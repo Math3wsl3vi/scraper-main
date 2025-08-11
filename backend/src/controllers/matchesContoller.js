@@ -1,4 +1,4 @@
-import matchesModel from '../models/matchesModel.js';
+const matchesModel = require('../models/matchesModel.js');
 
 const matchesController = {
   async getAllMatches(req, res, next) {
@@ -48,4 +48,4 @@ const matchesController = {
   }
 };
 
-export default matchesController;
+module.exports = matchesController;

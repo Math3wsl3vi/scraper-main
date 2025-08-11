@@ -1,4 +1,4 @@
-import scraperService from '../services/scraperService.js';
+const scraperService = require('../services/scraperService.js');
 
 const scraperController = {
   async startScraper(req, res, next) {
@@ -20,4 +20,4 @@ const scraperController = {
   }
 };
 
-export default scraperController;
+module.exports = scraperController;

@@ -1,9 +1,9 @@
-import express from 'express';
-import scraperController from '../controllers/scraperController.js';
+const express = require('express');
+const scraperController = require('../controllers/scrapperController');
 
 const router = express.Router();
 
 router.post('/start', scraperController.startScraper);
 router.get('/status', scraperController.getScraperStatus);
 
-export default router;
+module.exports = router;

@@ -1,5 +1,6 @@
 const app = require('./app');
 const { testConnection } = require('./config/database');
+const { TournamentLinkScraper } = require('./scrapers/TournamentLinkScraper');
 const cronService = require('./services/cronService');
 
 const PORT = process.env.PORT || 3001;
@@ -25,6 +26,20 @@ const startServer = async () => {
     process.exit(1);
   }
 };
+
+app.post('/scrape', async (req, res) => {
+  try {
+    const { url, venues } = req.body;
+
+    const scraper = new TournamentLinkScraper(venues);
+    const result = await scraper.scrapeFullTournament(url);
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('Scrape error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 // Graceful shutdown
 process.on('SIGTERM', () => {

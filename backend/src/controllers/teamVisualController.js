@@ -1,4 +1,4 @@
-import teamVisualsModel from '../models/teamVisualsModel.js';
+const teamVisualsModel = require('../models/teamVisualsModel.js');
 
 const teamVisualsController = {
   async getAllTeamVisuals(req, res, next) {
@@ -38,4 +38,4 @@ const teamVisualsController = {
   }
 };
 
-export default teamVisualsController;
+module.exports = teamVisualsController;

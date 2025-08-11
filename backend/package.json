@@ -7,7 +7,8 @@
     "dev": "nodemon src/server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix"
+    "lint:fix": "eslint src/ --fix",
+    "db:setup": "mysql -u root -p < database.sql"
   },
   "keywords": [],
   "author": "",

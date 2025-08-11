@@ -1,4 +1,4 @@
-import logsModel from '../models/logsModel.js';
+const logsModel = require('../models/logsModel.js');
 
 const logsController = {
   async getAllLogs(req, res, next) {
@@ -21,4 +21,4 @@ const logsController = {
   }
 };
 
-export default logsController;
+module.exports = logsController;

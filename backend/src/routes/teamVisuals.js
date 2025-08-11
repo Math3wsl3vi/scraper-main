@@ -1,5 +1,5 @@
-import express from 'express';
-import teamVisualsController from '../controllers/teamVisualsController.js';
+const express = require('express');
+const teamVisualsController = require('../controllers/teamVisualController');
 
 const router = express.Router();
 
@@ -8,4 +8,4 @@ router.post('/', teamVisualsController.addTeamVisual);
 router.put('/:id', teamVisualsController.updateTeamVisual);
 router.delete('/:id', teamVisualsController.deleteTeamVisual);
 
-export default router;
+module.exports = router;

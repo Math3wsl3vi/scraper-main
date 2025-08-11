@@ -1,5 +1,5 @@
-import express from 'express';
-import matchesController from '../controllers/matchesController.js';
+const express = require('express');
+const matchesController = require('../controllers/matchesContoller.js');
 
 const router = express.Router();
 
@@ -9,4 +9,4 @@ router.post('/', matchesController.addMatch);
 router.put('/:id', matchesController.updateMatch);
 router.delete('/:id', matchesController.deleteMatch);
 
-export default router;
+module.exports = router;
