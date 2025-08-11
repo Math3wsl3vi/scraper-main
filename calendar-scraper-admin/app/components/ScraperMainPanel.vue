@@ -251,6 +251,13 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import ConfirmDialog from './confirmDialog.vue'
+import MatchCard from './MatchCard.vue'
+
+import { useScraper } from '@/composables/useScraper'
+import { useMatches } from '@/composables/useMatches'
+import { useLogs } from '@/composables/useLogs'
+import { useNotifications } from '@/composables/useNotifications'
 
 const { settings, scraperStatus, updateSettings, startScraping } = useScraper()
 const { matches, clearMatches } = useMatches()
@@ -321,12 +328,11 @@ watch(() => scraperStatus.value, (newStatus) => {
 }, { deep: true })
 
 // Computed properties
+const now = ref(new Date())
 const timeUntilMidnight = computed(() => {
-  const now = new Date()
   const midnight = new Date()
   midnight.setHours(24, 0, 0, 0)
-  
-  const diff = midnight - now
+  const diff = midnight - now.value
   return Math.floor(diff / (1000 * 60))
 })
 
@@ -485,7 +491,6 @@ const formatDateTime = (dateTime) => {
 }
 
 const updateTimeUntilMidnight = () => {
-  // Force reactivity update
-  timeUntilMidnight.value
+  now.value = new Date()
 }
 </script>
