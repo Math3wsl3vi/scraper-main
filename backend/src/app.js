@@ -5,7 +5,7 @@ const morgan = require('morgan');
 require('dotenv').config();
 
 // Import routes
-const scraperRoutes = require('./routes/scraper');
+const scraperRoutes = require('./routes/scraperRoutes');
 const matchRoutes = require('./routes/matches');
 const teamVisualsRoutes = require('./routes/teamVisuals');
 const logRoutes = require('./routes/logs');

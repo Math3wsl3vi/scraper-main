@@ -222,43 +222,118 @@
         No matches to display yet.
       </div>
       <div v-else class="space-y-2">
-        <MatchCard
+        <div
           v-for="match in matches"
           :key="match.id"
-          :match="match"
-        />
+          class="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
+        >
+          <div class="flex justify-between items-start">
+            <div class="flex-1">
+              <h4 class="font-medium text-gray-900">{{ match.homeTeam }} vs {{ match.awayTeam }}</h4>
+              <div class="text-sm text-gray-600 mt-1">
+                <span>{{ match.date }}</span>
+                <span v-if="match.time" class="ml-2">{{ match.time }}</span>
+              </div>
+              <div v-if="match.venue" class="text-sm text-blue-600 mt-1">
+                📍 {{ match.venue }}
+              </div>
+            </div>
+            <div v-if="match.score" class="text-right">
+              <div class="font-bold text-lg">{{ match.score }}</div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     
     <!-- Confirmation Modals -->
-    <ConfirmDialog
-      v-model="showClearMatchesConfirm"
-      title="Clear All Matches"
-      message="Are you sure you want to clear all matches? This action cannot be undone."
-      confirm-text="Clear Matches"
-      @confirm="clearAllMatches"
-    />
+    <div v-if="showClearMatchesConfirm" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+        <h3 class="text-lg font-medium text-gray-900 mb-4">Clear All Matches</h3>
+        <p class="text-gray-600 mb-6">Are you sure you want to clear all matches? This action cannot be undone.</p>
+        <div class="flex justify-end space-x-3">
+          <button
+            @click="showClearMatchesConfirm = false"
+            class="px-4 py-2 text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            @click="clearAllMatches"
+            class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+          >
+            Clear Matches
+          </button>
+        </div>
+      </div>
+    </div>
     
-    <ConfirmDialog
-      v-model="showClearLogsConfirm"
-      title="Clear All Logs"
-      message="Are you sure you want to clear all logs? This action cannot be undone."
-      confirm-text="Clear Logs"
-      @confirm="clearAllLogs"
-    />
+    <div v-if="showClearLogsConfirm" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+        <h3 class="text-lg font-medium text-gray-900 mb-4">Clear All Logs</h3>
+        <p class="text-gray-600 mb-6">Are you sure you want to clear all logs? This action cannot be undone.</p>
+        <div class="flex justify-end space-x-3">
+          <button
+            @click="showClearLogsConfirm = false"
+            class="px-4 py-2 text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            @click="clearAllLogs"
+            class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+          >
+            Clear Logs
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import ConfirmDialog from './confirmDialog.vue'
-import MatchCard from './MatchCard.vue'
 
-import { useScraper } from '@/composables/useScraper'
-import { useMatches } from '@/composables/useMatches'
-import { useLogs } from '@/composables/useLogs'
-import { useNotifications } from '@/composables/useNotifications'
+// Mock composables - replace these with your actual implementations
 
+const useMatches = () => {
+  const matches = ref([
+    {
+      id: 1,
+      homeTeam: 'Team A',
+      awayTeam: 'Team B',
+      date: '2025-01-15',
+      time: '19:00',
+      venue: 'Grøndal MultiCenter',
+      score: '3-1'
+    }
+  ])
+
+  const clearMatches = async () => {
+    matches.value = []
+  }
+
+  return { matches, clearMatches }
+}
+
+const useLogs = () => {
+  const clearLogs = async () => {
+    console.log('Logs cleared')
+  }
+
+  return { clearLogs }
+}
+
+const useNotifications = () => {
+  const addNotification = (message, type) => {
+    console.log(`${type.toUpperCase()}: ${message}`)
+    // You can implement actual notifications here
+  }
+
+  return { addNotification }
+}
+
+// Use the composables
 const { settings, scraperStatus, updateSettings, startScraping } = useScraper()
 const { matches, clearMatches } = useMatches()
 const { clearLogs } = useLogs()
@@ -293,19 +368,9 @@ const venuePresets = ref([
   }
 ])
 
-// Initialize default settings
+// Initialize and cleanup
 onMounted(() => {
-  settings.value = {
-    season: '2024/2025',
-    linkStructure: 'https://www.bordtennisportalen.dk/DBTU/HoldTurnering/Stilling/#4.{season}.{pool}.{group}.{region}...',
-    venues: 'Grøndal MultiCenter',
-    autorun: true
-  }
-  
-  // Parse initial venues
   parseVenues()
-  
-  // Update time until midnight every minute
   timeInterval.value = setInterval(updateTimeUntilMidnight, 60000)
 })
 
@@ -343,7 +408,6 @@ const parseVenues = () => {
     return
   }
   
-  // Parse venues from multiple formats
   const venues = settings.value.venues
     .split(/[;\n]/)
     .map(venue => venue.trim())
@@ -390,7 +454,6 @@ const testLinkLevels = async () => {
     currentLevel.value = 1
     addNotification('Starting link level navigation test...', 'info')
     
-    // Simulate link level progression
     const levels = ['Unions', 'Age Groups', 'Pools', 'Matches', 'Filtering']
     
     for (let i = 0; i < levels.length; i++) {
@@ -406,11 +469,9 @@ const testLinkLevels = async () => {
       scraperStatus.value.currentActivity = `Testing Level ${i + 1}: ${levels[i]}`
       scraperStatus.value.isRunning = true
       
-      // Simulate processing time
       await new Promise(resolve => setTimeout(resolve, 1500))
     }
     
-    // Mock results
     linkLevelStats.value = {
       unions: 3,
       ageGroups: 12,
