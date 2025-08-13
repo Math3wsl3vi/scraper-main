@@ -4,6 +4,7 @@ const { JSDOM } = require('jsdom');
 const mysql = require('mysql2/promise');
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('../config/database'); 
+const axios = require('axios');
 
 
 class ScraperService {
@@ -104,87 +105,87 @@ class ScraperService {
             if (connection) connection.release();
         }
     }
+async scrapeResults(driver, url, venue) {
+    try {
+        console.log(`🌐 Checking API for: ${url}`);
+        const fragment = url.split('#')[1] || '';
+        const [_, season, pool, group, region] = fragment.split(/\/|\./);
+        const apiUrl = 'https://www.bordtennisportalen.dk/api/matches'; // Replace with actual API
+        const response = await axios.get(apiUrl, {
+            params: { season, pool, group, region }
+        });
+        
+        const matches = response.data.map(match => ({
+            match_id: match.id || uuidv4(),
+            team1: match.home_team || match.hjemmehold || 'Unknown',
+            team2: match.away_team || match.udehold || 'Unknown',
+            date: match.date || match.dato || new Date().toISOString(),
+            venue: match.venue || match.spillested || venue,
+            home_score: match.home_score || match.hjemmescore,
+            away_score: match.away_score || match.udescore,
+            round: match.round || match.runde
+        }));
+        
+        console.log(`✔ Fetched ${matches.length} matches from API`);
+        return matches;
+    } catch (apiError) {
+        console.log('API not available, falling back to HTML scraping:', apiError.message);
+        console.log(`🌐 Loading URL: ${url}`);
+        await driver.get(url);
+        await this.waitForPageReady(driver);
+        
+        const table = await this.findResultsTable(driver);
+        if (!table) {
+            console.log('No results table found, returning empty matches');
+            return [];
+        }
+        return await this.extractMatchesFromTable(driver, table, venue);
+    }
+}
 
-    async scrapeResults(driver, url, venue) {
+async waitForPageReady(driver) {
+    // Wait for either body or specific loading indicator
+    await driver.wait(async () => {
         try {
-            await driver.get(url);
-            await driver.wait(until.elementLocated(By.css('table.matchlist')), 15000);
+            await driver.findElement(By.css('body'));
+            const loading = await driver.findElements(By.css('.loading-spinner, .loader'));
+            return loading.length === 0;
+        } catch (e) {
+            return false;
+        }
+    }, 30000);
+}
 
-            // Scroll to load content
-            let lastHeight = await driver.executeScript('return document.body.scrollHeight;');
-            for (let i = 0; i < 2; i++) {
-                await driver.executeScript('window.scrollTo(0, document.body.scrollHeight);');
-                await driver.sleep(500);
-                const newHeight = await driver.executeScript('return document.body.scrollHeight;');
-                const rowCount = await driver.executeScript('return document.querySelectorAll("table.matchlist tr:not(.headerrow)").length;');
-                if (rowCount > 0 || newHeight === lastHeight) break;
-                lastHeight = newHeight;
+async findResultsTable(driver) {
+    const selectors = [
+        'table#matchResults',
+        'table.matchlist',
+        'table.results-table',
+        'table.dataTable',
+        'div.results table',
+        'table[role="grid"]'
+    ];
+    
+    for (const selector of selectors) {
+        console.log(`Trying selector: ${selector}`);
+        try {
+            const table = await driver.wait(
+                until.elementLocated(By.css(selector)),
+                5000
+            );
+            if (await table.isDisplayed()) {
+                console.log(`✅ Found table with selector: ${selector}`);
+                return table;
             }
-
-            await driver.wait(until.elementLocated(By.css('table.matchlist tr:not(.headerrow)')), 15000);
-
-            const html = await driver.getPageSource();
-            if (!html) {
-                return { error: `Empty page source returned for URL: ${url}` };
-            }
-
-            const dom = new JSDOM(html);
-            const document = dom.window.document;
-            const table = document.querySelector('table.matchlist');
-
-            if (!table) {
-                return { error: 'No matchlist table found' };
-            }
-
-            // Extract headers
-            const headers = [];
-            const headerRow = table.querySelector('tr.headerrow');
-            if (headerRow) {
-                const headerCells = headerRow.querySelectorAll('td');
-                headerCells.forEach(cell => {
-                    let headerText = cell.textContent.toLowerCase().replace(/\s/g, '');
-                    headerText = headerText === '#' ? 'no' : headerText;
-                    headers.push(headerText);
-                });
-            }
-
-            // Extract matches
-            const matches = [];
-            const rows = table.querySelectorAll('tr:not(.headerrow)');
-            
-            rows.forEach(row => {
-                const cells = row.querySelectorAll('td');
-                const rowData = {};
-                
-                cells.forEach((cell, index) => {
-                    const value = cell.textContent.trim();
-                    const link = cell.querySelector('a');
-                    
-                    if (link && ['hjemmehold', 'udehold'].includes(headers[index])) {
-                        const onclick = link.getAttribute('onclick');
-                        const match = onclick?.match(/ShowStanding\((?:'[^']*',\s*){5}'(\d+)'/);
-                        if (match) {
-                            rowData[`${headers[index]}_id`] = match[1];
-                        }
-                    }
-                    
-                    if (index < headers.length) {
-                        rowData[headers[index]] = value;
-                    }
-                });
-
-                // Filter by venue
-                if (rowData.spillested && 
-                    rowData.spillested.toLowerCase().trim() === venue.toLowerCase().trim()) {
-                    matches.push(rowData);
-                }
-            });
-
-            return matches;
-        } catch (error) {
-            return { error: error.message };
+        } catch (e) {
+            console.log(`❌ Selector ${selector} failed: ${e.message}`);
+            continue;
         }
     }
+    console.log('No table found with any selector');
+    return null;
+}
+
 
    async scrapeMatchesForPool({ pool, linkStructure, venue, season }) {
     try {
@@ -318,6 +319,114 @@ class ScraperService {
             console.error('Error updating log:', error);
         }
     }
+
+    async extractMatchesFromTable(driver, table, venue) {
+    // Scroll table into view and wait
+    await driver.executeScript("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", table);
+    await driver.sleep(1500); // Increased wait for lazy loading
+    
+    // Get fresh HTML
+    const tableHtml = await table.getAttribute('outerHTML');
+    const dom = new JSDOM(`<!DOCTYPE html>${tableHtml}`);
+    const doc = dom.window.document;
+    
+    // 1. Extract headers with multiple fallbacks
+    const headers = [];
+    const headerRow = doc.querySelector('tr.headerrow') || 
+                     doc.querySelector('thead tr') || 
+                     doc.querySelector('tr:first-child');
+    
+    if (headerRow) {
+        const headerCells = headerRow.querySelectorAll('th, td');
+        headerCells.forEach((cell, index) => {
+            let headerText = cell.textContent
+                .toLowerCase()
+                .replace(/\s+/g, '_')
+                .replace(/[^a-z0-9_]/g, '')
+                .trim();
+                
+            headers.push(headerText || `col_${index}`);
+        });
+    } else {
+        // Estimate columns from first data row
+        const firstRow = doc.querySelector('tr:not(.headerrow)');
+        if (firstRow) {
+            const cellCount = firstRow.querySelectorAll('td').length;
+            headers.push(...Array.from({length: cellCount}, (_, i) => `col_${i}`));
+        }
+    }
+    
+    // 2. Extract matches
+    const matches = [];
+    const rows = doc.querySelectorAll('tr:not(.headerrow)');
+    
+    rows.forEach(row => {
+        try {
+            const cells = row.querySelectorAll('td');
+            const matchData = {};
+            
+            // Basic cell data
+            cells.forEach((cell, index) => {
+                if (index >= headers.length) return;
+                
+                const value = cell.textContent.trim();
+                matchData[headers[index]] = value;
+                
+                // Extract links/IDs for teams
+                if (headers[index].includes('hold')) { // Matches 'hjemmehold', 'udehold' etc.
+                    const link = cell.querySelector('a');
+                    if (link) {
+                        const href = link.getAttribute('href');
+                        const onclick = link.getAttribute('onclick');
+                        
+                        // Extract team ID from various possible patterns
+                        const idPatterns = [
+                            /ShowStanding\(.*?'(\d+)'/,
+                            /team_id=(\d+)/,
+                            /\/team\/(\d+)/,
+                            /id=(\d+)/
+                        ];
+                        
+                        for (const pattern of idPatterns) {
+                            const match = (onclick || href)?.match(pattern);
+                            if (match) {
+                                matchData[`${headers[index]}_id`] = match[1];
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // 3. Venue filtering
+            const venueKey = headers.find(h => h.includes('spillested')) || 'venue';
+            if (!venue || 
+                !matchData[venueKey] || 
+                matchData[venueKey].toLowerCase().includes(venue.toLowerCase())) {
+                
+                // Standardize match structure
+                matches.push({
+                    match_id: matchData.id || matchData.no || uuidv4(),
+                    date: matchData.dato || matchData.date,
+                    time: matchData.tid || matchData.time,
+                    home_team: matchData.hjemmehold || matchData.home,
+                    away_team: matchData.udehold || matchData.away,
+                    venue: matchData[venueKey],
+                    home_score: matchData.hjemmescore,
+                    away_score: matchData.udescore,
+                    round: matchData.runde,
+                    raw_data: matchData // Keep original structure
+                });
+            }
+            
+        } catch (rowError) {
+            console.error('Error processing row:', rowError);
+        }
+    });
+    
+    console.log(`✔ Extracted ${matches.length} matches`);
+    return matches;
+}
 
     async insertMatches(matches, metadata) {
         if (!Array.isArray(matches) || matches.length === 0) return;
