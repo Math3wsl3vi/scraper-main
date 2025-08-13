@@ -1,0 +1,14 @@
+[
+  {
+    "level": "WARNING",
+    "message": "https://consent.cookiebot.com/97ccf368-8c2f-4f68-a299-3a49264ce915/cc.js?renew=false&referer=www.bordtennisportalen.dk&dnt=false&init=false 0:315 \"Error: The domain WWW.BORDTENNISPORTALEN.DK is not authorized to show the cookie banner for domain group ID 97ccf368-8c2f-4f68-a299-3a49264ce915. Please add it to the domain group in the Cookiebot Manager to authorize the domain.\"",
+    "timestamp": 1755114487173,
+    "type": ""
+  },
+  {
+    "level": "SEVERE",
+    "message": "https://www.bordtennisportalen.dk/favicon.ico - Failed to load resource: the server responded with a status of 404 ()",
+    "timestamp": 1755114493164,
+    "type": ""
+  }
+]
