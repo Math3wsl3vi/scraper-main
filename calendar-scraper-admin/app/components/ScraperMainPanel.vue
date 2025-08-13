@@ -30,25 +30,24 @@
             rows="2"
           />
           <!-- Link Level Progress -->
-          <div class="mt-2 flex items-center space-x-2">
-            <span class="text-xs text-gray-500">Navigation Levels:</span>
-            <div class="flex space-x-1">
-              <div
-                v-for="level in 5"
-                :key="level"
-                :class="[
-                  'w-3 h-3 rounded-full text-xs flex items-center justify-center',
-                  currentLevel >= level
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-gray-200 text-gray-500'
-                ]"
-                :title="`Level ${level}: ${getLevelName(level)}`"
-              >
-                {{ level }}
-              </div>
-            </div>
-            <span class="text-xs text-gray-600">{{ getCurrentLevelDescription() }}</span>
-          </div>
+          <div v-if="scraperStatus.isRunning && scraperStatus.linkLevelProgress" class="bg-green-50 border border-green-200 rounded-lg p-4">
+    <h4 class="text-sm font-medium text-green-800 mb-2">Navigation Progress</h4>
+    <div class="space-y-2">
+      <div class="flex justify-between text-xs">
+        <span>Current Level: Match Scraping</span>
+        <span>{{ scraperStatus.linkLevelProgress.processed }}/{{ scraperStatus.linkLevelProgress.total }}</span>
+      </div>
+      <div class="w-full bg-green-200 rounded-full h-2">
+        <div 
+          class="bg-green-600 h-2 rounded-full transition-all duration-300"
+          :style="{ width: `${scraperStatus.linkLevelProgress.percentage}%` }"
+        ></div>
+      </div>
+      <div class="text-xs text-green-700">
+        {{ scraperStatus.linkLevelProgress.currentItem }}
+      </div>
+    </div>
+  </div>
         </div>
       </div>
       
@@ -382,14 +381,18 @@ onUnmounted(() => {
 })
 
 // Watch for scraper status changes
-watch(() => scraperStatus.value, (newStatus) => {
+watch(() => scraperStatus, (newStatus) => {
   if (newStatus.linkLevelProgress) {
     linkLevelProgress.value = newStatus.linkLevelProgress
-    currentLevel.value = newStatus.linkLevelProgress.level || 0
+    currentLevel.value = 4 // Fixed to match scraping level
   }
-  
   if (newStatus.linkLevelStats) {
     linkLevelStats.value = newStatus.linkLevelStats
+  }
+  if (!newStatus.isRunning && newStatus.lastRun) {
+    addNotification(`Scraping completed with ${matches.length} matches`, 'success')
+  } else if (newStatus.error) {
+    addNotification(`Scraping failed: ${newStatus.error}`, 'error')
   }
 }, { deep: true })
 

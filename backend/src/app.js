@@ -49,13 +49,25 @@ app.use(`${apiPrefix}/logs`, logRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV 
-  });
+    res.json({
+        status: 'OK',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV || 'development',
+        port: PORT,
+        availableRoutes: [
+            'GET /health',
+            'GET /debug/routes',
+            'POST /api/v1/scraper/run-all-calendar-scraper',
+            'GET /api/v1/scraper/scraper-progress',
+            'DELETE /api/v1/scraper/events',
+            'DELETE /api/v1/scraper/logs',
+            'GET /api/v1/scraper/logs',
+            'POST /api/v1/scraper/venue-search',
+            'GET /api/v1/scraper/last-venue'
+        ]
+    });
 });
-
 // Error handling middleware (should be last)
 app.use(errorHandler);
 
