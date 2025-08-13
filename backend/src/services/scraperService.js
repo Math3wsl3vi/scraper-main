@@ -186,29 +186,49 @@ class ScraperService {
         }
     }
 
-       async scrapeMatchesForPool({ pool, linkStructure, venue, season }) {
-        try {
-            console.log(`Scraping matches for pool: ${pool.pool_name}`);
-            
-            // Implement your actual scraping logic here
-            // Example placeholder - replace with real implementation:
-            const matches = [
-                {
-                    match_id: '1',
-                    team1: 'Team A',
-                    team2: 'Team B',
-                    date: '2024-01-01',
-                    venue: venue || 'Unknown venue'
-                }
-            ];
-            
-            return matches;
-        } catch (error) {
-            console.error(`Error scraping pool ${pool.pool_id}:`, error);
-            throw error;
+   async scrapeMatchesForPool({ pool, linkStructure, venue, season }) {
+    try {
+        console.log(`Scraping matches for pool: ${pool.pool_name}`);
+        
+        // Initialize WebDriver if not already done
+        await this.initDriver();
+        
+        // Construct the URL using the link structure and pool data
+        const url = linkStructure
+            .replace('{pool}', pool.pool_value)
+            .replace('{group}', pool.age_group_id)
+            .replace('{region}', pool.region_id)
+            .replace('{season}', season);
+        
+        console.log(`Scraping URL: ${url}`);
+        
+        // Use the actual scrapeResults method
+        const result = await this.scrapeResults(this.driver, url, venue);
+        
+        if (result.error) {
+            throw new Error(result.error);
         }
+        
+        // Transform scraped data to match your database schema
+        const matches = result.map(match => ({
+            match_id: match.no || uuidv4(),
+            team1: match.hjemmehold || 'Unknown',
+            team2: match.udehold || 'Unknown',
+            date: match.dato || new Date().toISOString(),
+            venue: match.spillested || venue,
+            // Add other fields from your scrape as needed
+            pool_id: pool.pool_id,
+            season: season
+        }));
+        
+        console.log(`Found ${matches.length} matches for pool ${pool.pool_name}`);
+        return matches;
+        
+    } catch (error) {
+        console.error(`Error scraping pool ${pool.pool_name}:`, error);
+        throw error;
     }
-
+}
    async runAllCalendarScraper(params) {
         let connection;
         try {

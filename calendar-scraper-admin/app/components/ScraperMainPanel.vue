@@ -26,7 +26,7 @@
           <textarea 
             v-model="settings.linkStructure"
             readonly
-            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-50 text-sm font-mono"
+            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-50 text-black text-sm font-mono"
             rows="2"
           />
           <!-- Link Level Progress -->
