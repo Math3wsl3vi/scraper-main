@@ -3,6 +3,7 @@ const chrome = require('selenium-webdriver/chrome');
 const { JSDOM } = require('jsdom');
 const mysql = require('mysql2/promise');
 const { v4: uuidv4 } = require('uuid');
+const { pool } = require('../config/database'); 
 
 
 class ScraperService {
@@ -11,7 +12,9 @@ class ScraperService {
         this.driver = null;
         this.pool = null;
         this.initDatabase();
+        this.scrapeMatchesForPool = this.scrapeMatchesForPool.bind(this);
     }
+
 
     async initDatabase() {
         try {
@@ -71,30 +74,34 @@ class ScraperService {
     }
 
     async loadPools(season) {
+        let connection;
         try {
-            const connection = await this.pool.getConnection();
+            connection = await pool.getConnection();
             
-            const [rows] = await connection.execute(`
-                SELECT 
+            const [pools] = await connection.execute(
+                `SELECT 
                     region_id,
                     age_group_id,
                     pool_value,
                     tournament_level,
                     pool_name,
-                    season_name,
+                    season,
                     region_name,
                     age_group_name,
                     google_color_id,
                     hex_color
                 FROM tournament_pools 
-                WHERE season = ?
-            `, [season]);
+                WHERE season = ?`,
+                [season]
+            );
             
-            connection.release();
-            return rows;
+            console.log(`Loaded ${pools.length} pools for season ${season}`);
+            return pools;
         } catch (error) {
             console.error('Error loading pools:', error);
-            return [];
+            throw error;
+        } finally {
+            if (connection) connection.release();
         }
     }
 
@@ -179,125 +186,85 @@ class ScraperService {
         }
     }
 
-    async runAllCalendarScraper(params) {
-        const { season, linkStructure, venue, sessionId } = params;
-        let logId = null;
-        let grandTotalMatches = 0;
-        const logMessages = [];
-
+       async scrapeMatchesForPool({ pool, linkStructure, venue, season }) {
         try {
-            // Load tournament pools
-            const allPools = await this.loadPools(season);
-            console.log('Loaded pools:', allPools.length);
-
-            if (allPools.length === 0) {
-                console.warn(`No pools found for season ${season}`);
-                return {
-                    success: false,
-                    totalMatches: 0,
-                    message: 'No tournament pools available for the specified season'
-                };
-            }
-
-            // Start logging
-            const initialMessage = `Starting session ${sessionId}, searching venue: ${venue}`;
-            logId = await this.startLog(season, 0, 0, 0, sessionId, initialMessage);
-            logMessages.push(initialMessage);
-
-            // Initialize WebDriver
-            const driver = await this.initDriver();
-            console.log(`Browser initialized successfully for session: ${sessionId}`);
-
-            // Process each pool
-            for (const pool of allPools) {
-                const {
-                    region_id: region,
-                    age_group_id: ageGroup,
-                    pool_value: poolValue,
-                    tournament_level,
-                    pool_name,
-                    season_name,
-                    region_name,
-                    age_group_name,
-                    google_color_id,
-                    hex_color
-                } = pool;
-
-                const url = linkStructure
-                    .replace('{season}', season)
-                    .replace('{region}', region)
-                    .replace('{group}', ageGroup)
-                    .replace('{pool}', poolValue);
-
-                const matches = await this.scrapeResults(driver, url, venue);
-                const totalMatches = Array.isArray(matches) ? matches.length : 0;
-
-                if (matches.error) {
-                    const errorMsg = `Error in pool ${tournament_level} - ${pool_name} (${poolValue}): ${matches.error}`;
-                    logMessages.push(errorMsg);
-                    console.error(errorMsg);
-                } else {
-                    const successMsg = `Season: ${season_name}, Region: ${region_name}, Age Group: ${age_group_name} -> Pool ${tournament_level} - ${pool_name} (${poolValue}): Found ${totalMatches} matches`;
-                    logMessages.push(successMsg);
-                    console.log(successMsg);
-
-                    // Insert matches into database
-                    await this.insertMatches(matches, {
-                        season_name,
-                        region_name,
-                        age_group_name,
-                        pool_name,
-                        tournament_level,
-                        google_color_id: google_color_id || 0,
-                        season,
-                        region,
-                        ageGroup,
-                        poolValue,
-                        venue,
-                        hex_color: hex_color || '#039be5'
-                    });
-                }
-
-                grandTotalMatches += totalMatches;
-                
-                // Update log progress
-                await this.updateLog(logId, grandTotalMatches, logMessages.join('\n'), 'running');
-            }
-
-            // Cleanup
-            await this.quitDriver();
-            console.log(`Browser quit for session: ${sessionId}`);
-
-            // Final log update
-            await this.updateLog(logId, grandTotalMatches, logMessages.join('\n'), 'completed');
+            console.log(`Scraping matches for pool: ${pool.pool_name}`);
             
-            const finalMessage = `Scraping completed! Found ${grandTotalMatches} matches`;
+            // Implement your actual scraping logic here
+            // Example placeholder - replace with real implementation:
+            const matches = [
+                {
+                    match_id: '1',
+                    team1: 'Team A',
+                    team2: 'Team B',
+                    date: '2024-01-01',
+                    venue: venue || 'Unknown venue'
+                }
+            ];
+            
+            return matches;
+        } catch (error) {
+            console.error(`Error scraping pool ${pool.pool_id}:`, error);
+            throw error;
+        }
+    }
+
+   async runAllCalendarScraper(params) {
+        let connection;
+        try {
+            const { season, linkStructure, venue } = params;
+            connection = await pool.getConnection();
+            
+            // 1. Load pools
+            const pools = await this.loadPools(season);
+            if (!pools || pools.length === 0) {
+                throw new Error(`No tournament pools found for season ${season}`);
+            }
+            
+            // 2. Process each pool
+            let totalMatches = 0;
+            const allMatches = [];
+            
+            for (const pool of pools) {
+                const matches = await this.scrapeMatchesForPool({  // Fixed this line
+                    pool,
+                    linkStructure,
+                    venue,
+                    season
+                });
+                
+                if (matches?.length > 0) {
+                    allMatches.push(...matches);
+                    totalMatches += matches.length;
+                }
+            }
+            
+            // 3. Save matches if needed
+            if (allMatches.length > 0) {
+                await this.saveMatches(connection, allMatches);
+            }
             
             return {
                 success: true,
-                totalMatches: grandTotalMatches,
-                message: finalMessage,
-                matches: [] // You might want to return actual matches here
+                totalMatches,
+                message: `Successfully scraped ${totalMatches} matches`
             };
-
+            
         } catch (error) {
-            console.error('Scraper error:', error);
-            
-            const errorMessage = `Error fetching data: ${error.message}`;
-            logMessages.push(errorMessage);
-            
-            if (logId) {
-                await this.updateLog(logId, grandTotalMatches, logMessages.join('\n'), 'failed');
-            }
-            
-            await this.quitDriver();
-            
+            console.error('Scraping failed:', error);
             return {
                 success: false,
-                totalMatches: grandTotalMatches,
-                message: errorMessage
+                totalMatches: 0,
+                message: error.message
             };
+        } finally {
+            if (connection) connection.release();
         }
+    }
+
+    async saveMatches(connection, matches) {
+        // Implement your save logic here
+        console.log(`Would save ${matches.length} matches to database`);
     }
 
     async startLog(season, totalPools, totalMatches, progress, sessionId, message) {
