@@ -293,6 +293,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useScraper } from '~/composables/useScraper'
 
 // Mock composables - replace these with your actual implementations
 

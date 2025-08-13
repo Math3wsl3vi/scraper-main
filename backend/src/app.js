@@ -18,12 +18,19 @@ const app = express();
 // Security middleware
 app.use(helmet());
 
-// CORS configuration
+// Enable CORS for the frontend origin
+const allowedOrigins = ['http://localhost:3000']; // Add more origins in production if needed
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://your-nuxt-frontend.com'] // Replace with your Nuxt app URL
-    : ['http://localhost:3000'], // Default Nuxt dev port
-  credentials: true
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'POST', 'OPTIONS'], // Allow necessary methods
+  allowedHeaders: ['Content-Type', 'Authorization'], // Allow necessary headers
+  credentials: true // Allow cookies/auth if needed
 }));
 
 // Logging
@@ -33,7 +40,7 @@ app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// API routes
+// API routes with prefix
 const apiPrefix = process.env.API_PREFIX || '/api/v1';
 app.use(`${apiPrefix}/scraper`, scraperRoutes);
 app.use(`${apiPrefix}/matches`, matchRoutes);

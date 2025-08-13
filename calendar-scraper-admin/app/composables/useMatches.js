@@ -1,25 +1,19 @@
-import { ref, readonly } from 'vue'
+import { ref } from 'vue'
 
 export const useMatches = () => {
-  const { apiCall } = useApi()
-  const { addNotification } = useNotifications()
-
   const matches = ref([])
 
-  const fetchMatches = async () => {
-    const data = await apiCall('/matches')
-    matches.value = data.matches || []
+  const addMatch = (match) => {
+    matches.value.push(match)
+  }
+
+  const addMatches = (newMatches) => {
+    matches.value = [...matches.value, ...newMatches]
   }
 
   const clearMatches = async () => {
-    await apiCall('/matches', { method: 'DELETE' })
     matches.value = []
-    addNotification('All matches cleared', 'success')
   }
 
-  return {
-    matches: readonly(matches),
-    fetchMatches,
-    clearMatches
-  }
+  return { matches, addMatch, addMatches, clearMatches }
 }
