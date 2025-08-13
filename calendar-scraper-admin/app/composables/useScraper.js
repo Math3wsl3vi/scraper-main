@@ -6,7 +6,7 @@ import { useNotifications } from './useNotifications'
 
 const settings = ref({
   season: '2024/2025',
-  linkStructure: 'https://www.bordtennisportalen.dk/DBTU/HoldTurnering/Stilling/#4.{season}.{pool}.{group}.{region}...',
+  linkStructure: 'https://www.bordtennisportalen.dk/DBTU/HoldTurnering/Stilling/#3,42024,14802,4006,4004,98710,,4203,',
   venues: 'Grøndal MultiCenter',
   autorun: true
 })

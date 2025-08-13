@@ -105,131 +105,166 @@ class ScraperService {
             if (connection) connection.release();
         }
     }
+
 async scrapeResults(driver, url, venue) {
-    try {
-        console.log(`🌐 Checking API for: ${url}`);
-        const fragment = url.split('#')[1] || '';
-        const [_, season, pool, group, region] = fragment.split(/\/|\./);
-        const apiUrl = 'https://www.bordtennisportalen.dk/api/matches'; // Replace with actual API
-        const response = await axios.get(apiUrl, {
-            params: { season, pool, group, region }
-        });
-        
-        const matches = response.data.map(match => ({
-            match_id: match.id || uuidv4(),
-            team1: match.home_team || match.hjemmehold || 'Unknown',
-            team2: match.away_team || match.udehold || 'Unknown',
-            date: match.date || match.dato || new Date().toISOString(),
-            venue: match.venue || match.spillested || venue,
-            home_score: match.home_score || match.hjemmescore,
-            away_score: match.away_score || match.udescore,
-            round: match.round || match.runde
-        }));
-        
-        console.log(`✔ Fetched ${matches.length} matches from API`);
-        return matches;
-    } catch (apiError) {
-        console.log('API not available, falling back to HTML scraping:', apiError.message);
-        console.log(`🌐 Loading URL: ${url}`);
-        await driver.get(url);
-        await this.waitForPageReady(driver);
-        
-        const table = await this.findResultsTable(driver);
-        if (!table) {
-            console.log('No results table found, returning empty matches');
+        try {
+            console.log(`🌐 Loading URL: ${url}`);
+            await driver.get(url);
+            await this.waitForPageReady(driver);
+            
+            // Save page source for debugging
+            const pageSource = await driver.getPageSource();
+            require('fs').writeFileSync(`page-source-${Date.now()}.html`, pageSource);
+            
+            const table = await this.findResultsTable(driver);
+            if (!table) {
+                console.log('No results table found, returning empty matches');
+                // Check for "no matches" message
+                try {
+                    const noMatches = await driver.findElements(By.css('p, div, span'));
+                    for (const element of noMatches) {
+                        const text = await element.getText();
+                        if (text.toLowerCase().includes('ingen kampe') || text.toLowerCase().includes('no matches')) {
+                            console.log(`Found message: ${text}`);
+                            return [];
+                        }
+                    }
+                } catch (e) {
+                    console.log('No "no matches" message found:', e.message);
+                }
+                return [];
+            }
+            
+            return await this.extractMatchesFromTable(driver, table, venue);
+        } catch (error) {
+            console.error('❌ Scrape error:', error);
+            await driver.takeScreenshot().then(image => {
+                require('fs').writeFileSync(`error-screenshot-${Date.now()}.png`, image, 'base64');
+            });
             return [];
         }
-        return await this.extractMatchesFromTable(driver, table, venue);
     }
-}
 
 async waitForPageReady(driver) {
-    // Wait for either body or specific loading indicator
-    await driver.wait(async () => {
-        try {
-            await driver.findElement(By.css('body'));
-            const loading = await driver.findElements(By.css('.loading-spinner, .loader'));
-            return loading.length === 0;
-        } catch (e) {
-            return false;
+        // Wait for page body
+        await driver.wait(until.elementLocated(By.css('body')), 30000);
+        
+        // Handle fragment-based navigation (tabs, dropdowns)
+        const tabSelectors = [
+            'a[href*="#4.2024/2025"]', // Match fragment pattern
+            'select#season',            // Season dropdown
+            'select#pool',              // Pool dropdown
+            'select#group',             // Group dropdown
+            'select#region',            // Region dropdown
+            'li.active',                // Active tab
+            'div.tab-pane',             // Tab content
+            'button[data-season]',      // Buttons with season data
+            'a.nav-link',               // Navigation links
+        ];
+        
+        for (const selector of tabSelectors) {
+            try {
+                const element = await driver.findElement(By.css(selector));
+                await driver.executeScript("arguments[0].click();", element);
+                console.log(`Clicked element with selector: ${selector}`);
+                await driver.sleep(3000); // Wait for content to load
+                break;
+            } catch (e) {
+                console.log(`No element found for ${selector}: ${e.message}`);
+            }
         }
-    }, 30000);
-}
+        
+        // Scroll to trigger lazy loading
+        await driver.executeScript('window.scrollTo(0, document.body.scrollHeight);');
+        await driver.sleep(2000);
+        
+        // Wait for absence of loading indicators
+        await driver.wait(async () => {
+            const loading = await driver.findElements(By.css('.loading-spinner, .loader, .spinner, .loading, .preloader'));
+            return loading.length === 0;
+        }, 30000);
+        
+        // Explicitly wait for table or container
+        try {
+            await driver.wait(
+                until.elementLocated(By.css('table, div#results, section.results, div.table-container, div.content')),
+                10000
+            );
+            console.log('Table or results container found');
+        } catch (e) {
+            console.log('No table or results container found:', e.message);
+        }
+    }
 
 async findResultsTable(driver) {
-    const selectors = [
-        'table#matchResults',
-        'table.matchlist',
-        'table.results-table',
-        'table.dataTable',
-        'div.results table',
-        'table[role="grid"]'
-    ];
-    
-    for (const selector of selectors) {
-        console.log(`Trying selector: ${selector}`);
-        try {
-            const table = await driver.wait(
-                until.elementLocated(By.css(selector)),
-                5000
-            );
-            if (await table.isDisplayed()) {
-                console.log(`✅ Found table with selector: ${selector}`);
-                return table;
+        const selectors = [
+            'table#standings',         // Common for sports standings
+            'table.results',           // Alternative class
+            'table.match-table',       // Possible match table
+            'table.table-striped',     // Bootstrap-style table
+            'table.table-bordered',    // Bootstrap bordered table
+            'div#results table',       // Table inside results div
+            'div.table-container table', // Generic container
+            'table.data-table',        // Common for data tables
+            'table',                   // Fallback to any table
+        ];
+        
+        for (const selector of selectors) {
+            console.log(`Trying selector: ${selector}`);
+            try {
+                const table = await driver.wait(
+                    until.elementLocated(By.css(selector)),
+                    10000 // Increased timeout
+                );
+                if (await table.isDisplayed()) {
+                    console.log(`✅ Found table with selector: ${selector}`);
+                    return table;
+                }
+            } catch (e) {
+                console.log(`❌ Selector ${selector} failed: ${e.message}`);
+                continue;
             }
-        } catch (e) {
-            console.log(`❌ Selector ${selector} failed: ${e.message}`);
-            continue;
         }
+        console.log('No table found with any selector');
+        return null;
     }
-    console.log('No table found with any selector');
-    return null;
-}
 
 
-   async scrapeMatchesForPool({ pool, linkStructure, venue, season }) {
-    try {
-        console.log(`Scraping matches for pool: ${pool.pool_name}`);
-        
-        // Initialize WebDriver if not already done
-        await this.initDriver();
-        
-        // Construct the URL using the link structure and pool data
-        const url = linkStructure
-            .replace('{pool}', pool.pool_value)
-            .replace('{group}', pool.age_group_id)
-            .replace('{region}', pool.region_id)
-            .replace('{season}', season);
-        
-        console.log(`Scraping URL: ${url}`);
-        
-        // Use the actual scrapeResults method
-        const result = await this.scrapeResults(this.driver, url, venue);
-        
-        if (result.error) {
-            throw new Error(result.error);
+async scrapeMatchesForPool({ pool, linkStructure, venue, season }) {
+        try {
+            console.log(`Scraping matches for pool: ${pool.pool_name}`);
+            await this.initDriver();
+            
+            const url = linkStructure
+                .replace('{pool}', pool.pool_value)
+                .replace('{group}', pool.age_group_id)
+                .replace('{region}', pool.region_id)
+                .replace('{season}', season);
+            
+            console.log(`Scraping URL: ${url}`);
+            const result = await this.scrapeResults(this.driver, url, venue);
+            
+            const matches = result.map(match => ({
+                match_id: match.match_id || uuidv4(),
+                team1: match.hjemmehold || match.team1 || 'Unknown',
+                team2: match.udehold || match.team2 || 'Unknown',
+                date: match.dato || match.date || new Date().toISOString(),
+                venue: match.spillested || match.venue || venue,
+                pool_id: pool.pool_id,
+                season: season,
+                home_score: match.hjemmescore || match.home_score,
+                away_score: match.udescore || match.away_score,
+                round: match.runde || match.round
+            }));
+            
+            console.log(`Found ${matches.length} matches for pool ${pool.pool_name}`);
+            return matches;
+        } catch (error) {
+            console.error(`Error scraping pool ${pool.pool_name}:`, error);
+            return [];
         }
-        
-        // Transform scraped data to match your database schema
-        const matches = result.map(match => ({
-            match_id: match.no || uuidv4(),
-            team1: match.hjemmehold || 'Unknown',
-            team2: match.udehold || 'Unknown',
-            date: match.dato || new Date().toISOString(),
-            venue: match.spillested || venue,
-            // Add other fields from your scrape as needed
-            pool_id: pool.pool_id,
-            season: season
-        }));
-        
-        console.log(`Found ${matches.length} matches for pool ${pool.pool_name}`);
-        return matches;
-        
-    } catch (error) {
-        console.error(`Error scraping pool ${pool.pool_name}:`, error);
-        throw error;
     }
-}
+    
    async runAllCalendarScraper(params) {
         let connection;
         try {
