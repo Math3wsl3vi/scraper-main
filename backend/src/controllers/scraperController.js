@@ -198,6 +198,43 @@ const getLastVenue = async (req, res) => {
             message: `Error fetching last venue: ${error.message}`
         });
     }
+}
+
+const getMatches = async (req, res) => {
+    try {
+        const { season } = req.query;
+        const matches = await scraperService.getMatches(season || '2024/2025');
+        res.status(200).json({
+            success: true,
+            matches
+        });
+    } catch (error) {
+        console.error('Error fetching matches:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch matches',
+            error: error.message
+        });
+    }
+};
+
+const clearMatches = async (req, res) => {
+    try {
+        const connection = await scraperService.pool.getConnection();
+        const [result] = await connection.execute('DELETE FROM cal_sync_matches');
+        connection.release();
+
+        res.json({
+            success: true,
+            message: `Deleted ${result.affectedRows} matches successfully`
+        });
+    } catch (error) {
+        console.error('Error clearing matches:', error);
+        res.status(500).json({
+            success: false,
+            message: `Error clearing matches: ${error.message}`
+        });
+    }
 };
 
 // Cleanup function
@@ -220,5 +257,8 @@ module.exports = {
     clearLog,
     getLogInfo,
     saveVenueSearch,
-    getLastVenue
+    getLastVenue,
+    getMatches,
+    clearMatches
 };
+    

@@ -6,7 +6,9 @@ const {
     clearLog,
     getLogInfo,
     saveVenueSearch,
-    getLastVenue
+    getLastVenue,
+    getMatches,
+    clearMatches
 } = require('../controllers/scraperController');
 
 const router = express.Router();
@@ -25,6 +27,8 @@ router.delete('/logs', clearLog);
 router.get('/logs', getLogInfo);
 router.post('/venue-search', saveVenueSearch);
 router.get('/last-venue', getLastVenue);
+router.delete('/matches', clearMatches);
+router.get('/matches', getMatches);
 
 // Simple test endpoint
 router.get('/test', (req, res) => {

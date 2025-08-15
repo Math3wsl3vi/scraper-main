@@ -17,7 +17,7 @@
         </select>
       </div>
 
-      <!-- Link Structure with Level Indicator -->
+      <!-- Link Structure -->
       <div class="flex items-start">
         <label class="text-sm font-medium text-gray-700 w-32 flex-shrink-0 mt-2">
           Link Structure:
@@ -29,29 +29,28 @@
             class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-50 text-black text-sm font-mono"
             rows="2"
           />
-          <!-- Link Level Progress -->
-          <div v-if="scraperStatus.isRunning && scraperStatus.linkLevelProgress" class="bg-green-50 border border-green-200 rounded-lg p-4">
-    <h4 class="text-sm font-medium text-green-800 mb-2">Navigation Progress</h4>
-    <div class="space-y-2">
-      <div class="flex justify-between text-xs">
-        <span>Current Level: Match Scraping</span>
-        <span>{{ scraperStatus.linkLevelProgress.processed }}/{{ scraperStatus.linkLevelProgress.total }}</span>
-      </div>
-      <div class="w-full bg-green-200 rounded-full h-2">
-        <div 
-          class="bg-green-600 h-2 rounded-full transition-all duration-300"
-          :style="{ width: `${scraperStatus.linkLevelProgress.percentage}%` }"
-        ></div>
-      </div>
-      <div class="text-xs text-green-700">
-        {{ scraperStatus.linkLevelProgress.currentItem }}
-      </div>
-    </div>
-  </div>
+          <div v-if="scraperStatus.isRunning && scraperStatus.linkLevelProgress" class="bg-green-50 border border-green-200 rounded-lg p-4 mt-2">
+            <h4 class="text-sm font-medium text-green-800 mb-2">Navigation Progress</h4>
+            <div class="space-y-2">
+              <div class="flex justify-between text-xs">
+                <span>Current Level: {{ scraperStatus.linkLevelProgress.currentLevel }}</span>
+                <span>{{ scraperStatus.linkLevelProgress.processed }}/{{ scraperStatus.linkLevelProgress.total }}</span>
+              </div>
+              <div class="w-full bg-green-200 rounded-full h-2">
+                <div 
+                  class="bg-green-600 h-2 rounded-full transition-all duration-300"
+                  :style="{ width: `${scraperStatus.linkLevelProgress.percentage}%` }"
+                ></div>
+              </div>
+              <div class="text-xs text-green-700">
+                {{ scraperStatus.linkLevelProgress.currentItem }}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       
-      <!-- Enhanced Venue Input with Multi-venue Support -->
+      <!-- Venue Input -->
       <div class="flex items-start">
         <label class="text-sm font-medium text-gray-700 w-32 flex-shrink-0 mt-2">
           Venues:
@@ -59,7 +58,6 @@
         <div class="flex-1">
           <textarea
             v-model="settings.venues"
-            type="text"
             placeholder="Enter venue names (separated by semicolons or new lines)"
             class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
             rows="3"
@@ -71,7 +69,6 @@
             <span class="font-mono">Grøndal MultiCenter, lokale 28</span>
           </div>
           
-          <!-- Parsed Venues Display -->
           <div v-if="parsedVenues.length > 0" class="mt-2">
             <div class="text-xs text-gray-600 mb-1">Active venues ({{ parsedVenues.length }}):</div>
             <div class="flex flex-wrap gap-1">
@@ -114,7 +111,6 @@
     
     <!-- Action Buttons -->
     <div class="flex flex-wrap gap-3 justify-between">
-      <!-- Autorun Toggle -->
       <button
         @click="toggleAutorun"
         :class="[
@@ -127,7 +123,6 @@
         Autorun: {{ settings.autorun ? 'On' : 'Off' }}
       </button>
       
-      <!-- Link Level Navigation Test -->
       <button
         @click="testLinkLevels"
         :disabled="scraperStatus.isRunning || parsedVenues.length === 0"
@@ -136,7 +131,6 @@
         Test Link Navigation
       </button>
       
-      <!-- Run Scraper -->
       <button
         @click="runScraper"
         :disabled="scraperStatus.isRunning || parsedVenues.length === 0"
@@ -145,7 +139,6 @@
         Run Full Scraper
       </button>
       
-      <!-- Clear All Matches -->
       <button
         @click="showClearMatchesConfirm = true"
         class="px-4 py-2 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 transition-colors"
@@ -153,7 +146,6 @@
         Clear All Matches
       </button>
       
-      <!-- Clear All Logs -->
       <button
         @click="showClearLogsConfirm = true"
         class="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors"
@@ -162,7 +154,7 @@
       </button>
     </div>
     
-    <!-- Enhanced Status Display -->
+    <!-- Status Display -->
     <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
       <div class="text-sm text-gray-700 space-y-2">
         <div v-if="scraperStatus.isScheduled" class="text-blue-800">
@@ -189,35 +181,27 @@
       </div>
     </div>
 
-    <!-- Link Level Progress Display -->
-    <div v-if="scraperStatus.isRunning && linkLevelProgress" class="bg-green-50 border border-green-200 rounded-lg p-4">
-      <h4 class="text-sm font-medium text-green-800 mb-2">Navigation Progress</h4>
-      <div class="space-y-2">
-        <div class="flex justify-between text-xs">
-          <span>Current Level: {{ linkLevelProgress.currentLevel }}</span>
-          <span>{{ linkLevelProgress.processed }}/{{ linkLevelProgress.total }}</span>
-        </div>
-        <div class="w-full bg-green-200 rounded-full h-2">
-          <div 
-            class="bg-green-600 h-2 rounded-full transition-all duration-300"
-            :style="{ width: `${(linkLevelProgress.processed / linkLevelProgress.total) * 100}%` }"
-          ></div>
-        </div>
-        <div class="text-xs text-green-700">
-          {{ linkLevelProgress.currentItem }}
-        </div>
-      </div>
-    </div>
-    
     <!-- Matches Display -->
     <div>
       <div class="flex justify-between items-center mb-3">
         <h3 class="text-lg font-medium text-gray-900">Scraped Matches</h3>
-        <div v-if="matches.length > 0" class="text-sm text-gray-500">
-          {{ matches.length }} matches found
+        <div class="flex items-center space-x-2">
+          <div v-if="matchesLoading" class="text-sm text-gray-500">
+            Loading matches...
+          </div>
+          <div v-else class="text-sm text-gray-500">
+            {{ matches.length }} matches found
+          </div>
         </div>
       </div>
-      <div v-if="matches.length === 0" class="text-gray-500 py-8 text-center">
+      <div v-if="matchesLoading" class="text-gray-500 py-8 text-center">
+        <span class="inline-block w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mr-2"></span>
+        Loading matches...
+      </div>
+      <div v-else-if="matchesError" class="text-red-500 py-8 text-center">
+        Error loading matches: {{ matchesError }}
+      </div>
+      <div v-else-if="matches.length === 0" class="text-gray-500 py-8 text-center">
         No matches to display yet.
       </div>
       <div v-else class="space-y-2">
@@ -230,11 +214,14 @@
             <div class="flex-1">
               <h4 class="font-medium text-gray-900">{{ match.homeTeam }} vs {{ match.awayTeam }}</h4>
               <div class="text-sm text-gray-600 mt-1">
-                <span>{{ match.date }}</span>
+                <span>{{ formatDate(match.date) }}</span>
                 <span v-if="match.time" class="ml-2">{{ match.time }}</span>
               </div>
               <div v-if="match.venue" class="text-sm text-blue-600 mt-1">
                 📍 {{ match.venue }}
+              </div>
+              <div v-if="match.pool" class="text-sm text-gray-500 mt-1">
+                Pool: {{ match.pool }}
               </div>
             </div>
             <div v-if="match.score" class="text-right">
@@ -291,64 +278,25 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { useScraper } from '~/composables/useScraper'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { useScraper } from '~/composables/useScraper';
+import { useMatches } from '~/composables/useMatches';
+import { useLogs } from '~/composables/useLogs';
+import { useNotifications } from '~/composables/useNotifications';
 
-// Mock composables - replace these with your actual implementations
+const { settings, scraperStatus, updateSettings, startScraping } = useScraper();
+const { matches, loading: matchesLoading, error: matchesError, fetchMatches, clearMatches } = useMatches();
+const { clearLogs } = useLogs();
+const { addNotification } = useNotifications();
 
-const useMatches = () => {
-  const matches = ref([
-    {
-      id: 1,
-      homeTeam: 'Team A',
-      awayTeam: 'Team B',
-      date: '2025-01-15',
-      time: '19:00',
-      venue: 'Grøndal MultiCenter',
-      score: '3-1'
-    }
-  ])
+const showClearMatchesConfirm = ref(false);
+const showClearLogsConfirm = ref(false);
+const timeInterval = ref(null);
+const parsedVenues = ref([]);
+const currentLevel = ref(0);
+const linkLevelProgress = ref(null);
+const linkLevelStats = ref(null);
 
-  const clearMatches = async () => {
-    matches.value = []
-  }
-
-  return { matches, clearMatches }
-}
-
-const useLogs = () => {
-  const clearLogs = async () => {
-    console.log('Logs cleared')
-  }
-
-  return { clearLogs }
-}
-
-const useNotifications = () => {
-  const addNotification = (message, type) => {
-    console.log(`${type.toUpperCase()}: ${message}`)
-    // You can implement actual notifications here
-  }
-
-  return { addNotification }
-}
-
-// Use the composables
-const { settings, scraperStatus, updateSettings, startScraping } = useScraper()
-const { matches, clearMatches } = useMatches()
-const { clearLogs } = useLogs()
-const { addNotification } = useNotifications()
-
-// Component state
-const showClearMatchesConfirm = ref(false)
-const showClearLogsConfirm = ref(false)
-const timeInterval = ref(null)
-const parsedVenues = ref([])
-const currentLevel = ref(0)
-const linkLevelProgress = ref(null)
-const linkLevelStats = ref(null)
-
-// Venue presets for quick selection
 const venuePresets = ref([
   {
     name: 'Test (Grøndal Only)',
@@ -366,114 +314,119 @@ const venuePresets = ref([
     name: 'All Copenhagen',
     venues: 'Grøndal MultiCenter; Øbro Hallen; Rødovre Centrum Arena'
   }
-])
+]);
 
-// Initialize and cleanup
 onMounted(() => {
-  parseVenues()
-  timeInterval.value = setInterval(updateTimeUntilMidnight, 60000)
-})
+  parseVenues();
+  fetchMatches(settings.value.season); // Fetch matches on mount
+  timeInterval.value = setInterval(updateTimeUntilMidnight, 60000);
+});
 
 onUnmounted(() => {
   if (timeInterval.value) {
-    clearInterval(timeInterval.value)
+    clearInterval(timeInterval.value);
   }
-})
+});
 
-// Watch for scraper status changes
-watch(() => scraperStatus, (newStatus) => {
+watch(scraperStatus, (newStatus) => {
+  if (newStatus.isRunning) {
+    fetchMatches(settings.value.season); // Refresh matches when scraping starts
+  }
   if (newStatus.linkLevelProgress) {
-    linkLevelProgress.value = newStatus.linkLevelProgress
-    currentLevel.value = 4 // Fixed to match scraping level
+    linkLevelProgress.value = newStatus.linkLevelProgress;
+    currentLevel.value = newStatus.linkLevelProgress.level || 4;
   }
   if (newStatus.linkLevelStats) {
-    linkLevelStats.value = newStatus.linkLevelStats
+    linkLevelStats.value = newStatus.linkLevelStats;
   }
   if (!newStatus.isRunning && newStatus.lastRun) {
-    addNotification(`Scraping completed with ${matches.length} matches`, 'success')
+    fetchMatches(settings.value.season); // Refresh matches after scraping completes
+    addNotification(`Scraping completed with ${matches.value.length} matches`, 'success');
   } else if (newStatus.error) {
-    addNotification(`Scraping failed: ${newStatus.error}`, 'error')
+    addNotification(`Scraping failed: ${newStatus.error}`, 'error');
   }
-}, { deep: true })
+}, { deep: true });
 
-// Computed properties
-const now = ref(new Date())
+watch(() => settings.value.season, (newSeason) => {
+  fetchMatches(newSeason); // Refresh matches when season changes
+});
+
+const now = ref(new Date());
 const timeUntilMidnight = computed(() => {
-  const midnight = new Date()
-  midnight.setHours(24, 0, 0, 0)
-  const diff = midnight - now.value
-  return Math.floor(diff / (1000 * 60))
-})
+  const midnight = new Date();
+  midnight.setHours(24, 0, 0, 0);
+  const diff = midnight - now.value;
+  return Math.floor(diff / (1000 * 60));
+});
 
-// Methods
 const parseVenues = () => {
   if (!settings.value.venues) {
-    parsedVenues.value = []
-    return
+    parsedVenues.value = [];
+    return;
   }
   
   const venues = settings.value.venues
     .split(/[;\n]/)
     .map(venue => venue.trim())
-    .filter(venue => venue.length > 0)
+    .filter(venue => venue.length > 0);
   
-  parsedVenues.value = venues
-}
+  parsedVenues.value = venues;
+};
 
 const removeVenue = (index) => {
-  parsedVenues.value.splice(index, 1)
-  settings.value.venues = parsedVenues.value.join('; ')
-}
+  parsedVenues.value.splice(index, 1);
+  settings.value.venues = parsedVenues.value.join('; ');
+};
 
 const applyVenuePreset = (preset) => {
-  settings.value.venues = preset.venues
-  parseVenues()
-  addNotification(`Applied preset: ${preset.name}`, 'success')
-}
+  settings.value.venues = preset.venues;
+  parseVenues();
+  addNotification(`Applied preset: ${preset.name}`, 'success');
+};
 
 const getLevelName = (level) => {
   const names = {
     1: 'Unions',
-    2: 'Age Groups', 
+    2: 'Age Groups',
     3: 'Pools',
     4: 'Matches',
     5: 'Filtering'
-  }
-  return names[level] || 'Unknown'
-}
+  };
+  return names[level] || 'Unknown';
+};
 
 const getCurrentLevelDescription = () => {
-  if (currentLevel.value === 0) return 'Ready to start navigation'
-  if (currentLevel.value <= 5) return `Currently at: ${getLevelName(currentLevel.value)}`
-  return 'Navigation complete'
-}
+  if (currentLevel.value === 0) return 'Ready to start navigation';
+  if (currentLevel.value <= 5) return `Currently at: ${getLevelName(currentLevel.value)}`;
+  return 'Navigation complete';
+};
 
 const testLinkLevels = async () => {
   if (parsedVenues.value.length === 0) {
-    addNotification('Please enter at least one venue', 'error')
-    return
+    addNotification('Please enter at least one venue', 'error');
+    return;
   }
   
   try {
-    currentLevel.value = 1
-    addNotification('Starting link level navigation test...', 'info')
+    currentLevel.value = 1;
+    addNotification('Starting link level navigation test...', 'info');
     
-    const levels = ['Unions', 'Age Groups', 'Pools', 'Matches', 'Filtering']
+    const levels = ['Unions', 'Age Groups', 'Pools', 'Matches', 'Filtering'];
     
     for (let i = 0; i < levels.length; i++) {
-      currentLevel.value = i + 1
+      currentLevel.value = i + 1;
       linkLevelProgress.value = {
         currentLevel: levels[i],
         level: i + 1,
         processed: Math.floor((i + 1) * 10),
         total: 50,
         currentItem: `Processing ${levels[i].toLowerCase()}...`
-      }
+      };
       
-      scraperStatus.value.currentActivity = `Testing Level ${i + 1}: ${levels[i]}`
-      scraperStatus.value.isRunning = true
+      scraperStatus.value.currentActivity = `Testing Level ${i + 1}: ${levels[i]}`;
+      scraperStatus.value.isRunning = true;
       
-      await new Promise(resolve => setTimeout(resolve, 1500))
+      await new Promise(resolve => setTimeout(resolve, 1500));
     }
     
     linkLevelStats.value = {
@@ -481,81 +434,94 @@ const testLinkLevels = async () => {
       ageGroups: 12,
       pools: 24,
       matches: 150
-    }
+    };
     
-    scraperStatus.value.isRunning = false
-    scraperStatus.value.currentActivity = ''
-    linkLevelProgress.value = null
-    currentLevel.value = 0
+    scraperStatus.value.isRunning = false;
+    scraperStatus.value.currentActivity = '';
+    linkLevelProgress.value = null;
+    currentLevel.value = 0;
     
-    addNotification('Link level test completed successfully!', 'success')
-    
+    addNotification('Link level test completed successfully!', 'success');
   } catch (error) {
-    scraperStatus.value.isRunning = false
-    linkLevelProgress.value = null
-    currentLevel.value = 0
-    addNotification(`Link level test failed: ${error.message}`, 'error')
+    scraperStatus.value.isRunning = false;
+    linkLevelProgress.value = null;
+    currentLevel.value = 0;
+    addNotification(`Link level test failed: ${error.message}`, 'error');
   }
-}
+};
 
 const toggleAutorun = async () => {
-  settings.value.autorun = !settings.value.autorun
+  settings.value.autorun = !settings.value.autorun;
   await updateSettings({ 
     autorun: settings.value.autorun,
     venues: parsedVenues.value
-  })
-  
+  });
   addNotification(
     `Autorun ${settings.value.autorun ? 'enabled' : 'disabled'}`,
     'success'
-  )
-}
+  );
+};
 
 const runScraper = async () => {
   if (parsedVenues.value.length === 0) {
-    addNotification('Please enter at least one venue name', 'error')
-    return
+    addNotification('Please enter at least one venue name', 'error');
+    return;
   }
   
   try {
-    currentLevel.value = 1
+    currentLevel.value = 1;
     await startScraping({
       venues: parsedVenues.value,
       season: settings.value.season,
-      linkStructure: settings.value.linkStructure
-    })
+      linkStructure: settings.value.linkStructure,
+      sessionId: `session_${Date.now()}`
+    });
   } catch (error) {
-    currentLevel.value = 0
-    addNotification(`Failed to start scraper: ${error.message}`, 'error')
+    currentLevel.value = 0;
+    addNotification(`Failed to start scraper: ${error.message}`, 'error');
   }
-}
+};
 
 const clearAllMatches = async () => {
   try {
-    await clearMatches()
-    linkLevelStats.value = null
-    addNotification('All matches cleared successfully', 'success')
+    await clearMatches();
+    linkLevelStats.value = null;
+    addNotification('All matches cleared successfully', 'success');
   } catch (error) {
-    addNotification(`Failed to clear matches: ${error.message}`, 'error')
+    addNotification(`Failed to clear matches: ${error.message}`, 'error');
   }
-  showClearMatchesConfirm.value = false
-}
+  showClearMatchesConfirm.value = false;
+};
 
 const clearAllLogs = async () => {
   try {
-    await clearLogs()
-    addNotification('All logs cleared successfully', 'success')
+    await clearLogs();
+    addNotification('All logs cleared successfully', 'success');
   } catch (error) {
-    addNotification(`Failed to clear logs: ${error.message}`, 'error')
+    addNotification(`Failed to clear logs: ${error.message}`, 'error');
   }
-  showClearLogsConfirm.value = false
-}
+  showClearLogsConfirm.value = false;
+};
 
 const formatDateTime = (dateTime) => {
-  return new Date(dateTime).toLocaleString()
-}
+  return new Date(dateTime).toLocaleString();
+};
+
+const formatDate = (date) => {
+  return new Date(date).toLocaleDateString();
+};
 
 const updateTimeUntilMidnight = () => {
-  now.value = new Date()
-}
+  now.value = new Date();
+};
 </script>
+
+<style scoped>
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+</style>
