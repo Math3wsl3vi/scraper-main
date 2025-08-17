@@ -8,3 +8,8 @@ coverage/
 dist/
 build/
 screenshots/
+
+# Ignore all debug output files
+*.png
+*.html
+*.log

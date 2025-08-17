@@ -33,6 +33,7 @@
     "path-to-regexp": "^6.2.1",
     "puppeteer": "^24.16.0",
     "selenium-webdriver": "^4.35.0",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "xlsx": "^0.18.5"
   }
 }

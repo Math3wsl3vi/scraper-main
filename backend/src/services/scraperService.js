@@ -40,45 +40,49 @@ class ScraperService {
         }
     }
 
-    async initDriver() {
-        if (!this.driver) {
-            try {
-                const options = new chrome.Options();
-                options.addArguments(
-                    '--headless=new', // Use new headless mode
-                    '--disable-gpu',
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-web-security',
-                    '--disable-features=VizDisplayCompositor',
-                    '--window-size=1920,1080', // Set window size
-                    `--user-data-dir=/tmp/chrome-profile-${uuidv4()}`,
-                    '--disable-extensions',
-                    '--disable-blink-features=AutomationControlled',
-                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                );
-
-                // Remove automation flags
-                options.excludeSwitches('enable-automation');
-                options.addArguments('--disable-blink-features=AutomationControlled');
-
-                this.driver = await new Builder()
-                    .forBrowser('chrome')
-                    .setChromeOptions(options)
-                    .build();
-
-                // Execute script to remove webdriver property
-                await this.driver.executeScript("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})");
-
-                console.log('WebDriver initialized successfully');
-            } catch (error) {
-                console.error('WebDriver initialization failed:', error);
-                throw error;
+        async initDriver() {
+            if (!this.driver) {
+                try {
+                    const options = new chrome.Options();
+                    options.addArguments(
+                        '--headless=new',
+                        '--disable-gpu',
+                        '--no-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-web-security',
+                        '--disable-features=VizDisplayCompositor',
+                        '--window-size=1920,1080',
+                        `--user-data-dir=/tmp/chrome-profile-${uuidv4()}`,
+                        '--disable-extensions',
+                        '--disable-blink-features=AutomationControlled',
+                        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                        '--blink-settings=imagesEnabled=false', // Disable images to speed up loading
+                        '--disable-javascript' // Optional: test if content is static
+                    );
+                    
+                    options.excludeSwitches('enable-automation');
+                    options.addArguments('--disable-blink-features=AutomationControlled');
+                    
+                    this.driver = await new Builder()
+                        .forBrowser('chrome')
+                        .setChromeOptions(options)
+                        .build();
+                    
+                    // Remove webdriver traces
+                    await this.driver.executeScript(`
+                        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+                        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                    `);
+                    
+                    console.log('WebDriver initialized successfully');
+                } catch (error) {
+                    console.error('WebDriver initialization failed:', error);
+                    throw error;
+                }
             }
+            return this.driver;
         }
-        return this.driver;
-    }
-
     async getMatches(season) {
         let connection;
         try {
@@ -211,243 +215,345 @@ class ScraperService {
         }
     }
 
-    async waitForPageComplete(driver) {
-        console.log('⏳ Waiting for page to complete loading...');
+async handleAlerts(driver) {
+    try {
+        const alert = await driver.switchTo().alert();
+        const alertText = await alert.getText();
+        console.log(`🚨 Alert detected: "${alertText}"`);
+        await alert.accept();
+        await driver.sleep(1000);
+        return { success: false, message: alertText }; // Indicate failure for retry
+    } catch (e) {
+        return { success: true, message: 'No alert present' };
+    }
+}
+
+async scrapeResults(driver, url, venue, retries = 0) {
+    let allMatches = [];
+    let hasNextPage = true;
+    let currentUrl = url;
+    
+    while (hasNextPage) {
+        console.log(`🌐 Scraping page: ${currentUrl} (Attempt ${retries + 1}/3)`);
+        try {
+            await driver.get(currentUrl);
+            const alertResult = await this.handleAlerts(driver);
+            if (!alertResult.success && retries < 2) {
+                console.log(`⚠️ Retrying due to alert: ${alertResult.message}`);
+                await driver.sleep(2000);
+                return await this.scrapeResults(driver, url, venue, retries + 1);
+            }
+            
+            await this.waitForPageComplete(driver);
+            await this.debugPageContent(driver, currentUrl);
+            
+            const interactionSuccessful = await this.handleInteractiveElements(driver);
+            console.log(interactionSuccessful ? '🎉 Found content after interaction' : '⚠️ No additional content from interactions');
+            
+            const table = await this.findResultsTable(driver);
+            const matches = table ? await this.extractMatchesFromTable(driver, table, venue) : await this.extractAlternativeContent(driver, venue);
+            console.log(`📊 Matches on page: ${matches.length}`);
+            allMatches.push(...matches);
+            
+            // Check for next page
+            const nextButton = await driver.findElements(By.css('.pagination .next-page, [rel="next"], a[href*="page="], .page-link'));
+            if (nextButton.length > 0 && await nextButton[0].isDisplayed()) {
+                currentUrl = await nextButton[0].getAttribute('href');
+                console.log(`🔗 Navigating to next page: ${currentUrl}`);
+                await driver.sleep(1000);
+            } else {
+                hasNextPage = false;
+                console.log('🏁 No more pages to scrape');
+            }
+        } catch (error) {
+            console.error(`❌ Page scrape error: ${error.message}`);
+            if (error.name === 'UnexpectedAlertOpenError' && retries < 2) {
+                await driver.sleep(2000);
+                return await this.scrapeResults(driver, url, venue, retries + 1);
+            }
+            hasNextPage = false;
+        }
+    }
+    
+    console.log(`✔ Total matches from all pages: ${allMatches.length}`);
+    return allMatches;
+}
+
+async waitForPageComplete(driver) {
+    console.log('⏳ Waiting for page to complete loading...');
+    
+    try {
+        // Handle any immediate alerts
+        await this.handleAlerts(driver);
         
-        // Wait for basic page load
-        await driver.wait(until.elementLocated(By.css('body')), 30000);
+        // Wait for body element
+        await driver.wait(until.elementLocated(By.css('body')), 30000)
+            .catch(async (error) => {
+                console.error('Body element timeout:', error);
+                await this.handleAlerts(driver); // Check for alerts on timeout
+                throw error;
+            });
         
         // Wait for document ready state
         await driver.wait(async () => {
+            await this.handleAlerts(driver); // Check for alerts during ready state
             const readyState = await driver.executeScript('return document.readyState');
             return readyState === 'complete';
         }, 30000);
-
-        // Wait for any loading indicators to disappear
+        
+        // Wait for loading indicators to disappear
         const loadingSelectors = [
             '.loading', '.loader', '.spinner', '.preloader', 
             '[class*="loading"]', '[class*="spinner"]',
             '.fa-spinner', '.loading-overlay'
         ];
-
+        
         for (const selector of loadingSelectors) {
             try {
                 await driver.wait(async () => {
+                    await this.handleAlerts(driver); // Check for alerts during loading
                     const elements = await driver.findElements(By.css(selector));
                     return elements.length === 0;
                 }, 10000);
             } catch (e) {
-                // Loading selector might not exist, continue
+                console.log(`No elements found for selector ${selector}`);
+                await this.handleAlerts(driver);
             }
         }
-
-        // Scroll to trigger any lazy loading
+        
+        // Scroll to trigger lazy loading
+        await this.handleAlerts(driver);
         await driver.executeScript('window.scrollTo(0, document.body.scrollHeight)');
         await driver.sleep(2000);
+        await this.handleAlerts(driver);
         await driver.executeScript('window.scrollTo(0, 0)');
         await driver.sleep(1000);
-
+        await this.handleAlerts(driver);
+        
         console.log('✅ Page loading complete');
+    } catch (error) {
+        console.error('❌ Page loading failed:', error);
+        await this.handleAlerts(driver); // Final alert check
+        throw error;
     }
-
-    async handleInteractiveElements(driver) {
-        console.log('🔄 Checking for interactive elements...');
-        
-        // Common interactive elements that might reveal content
-        const interactiveSelectors = [
-            // Tabs and navigation
-            'a[href*="#"]',
-            '.tab', '.nav-tab', '.nav-link',
-            '[data-toggle="tab"]',
-            
-            // Dropdowns and selects
-            'select[name*="season"]', 'select[name*="pool"]', 'select[name*="group"]',
-            'select#season', 'select#pool', 'select#group', 'select#region',
-            
-            // Buttons
-            'button[data-season]', 'button[data-pool]',
-            '.btn[data-target]', '.button[data-target]',
-            
-            // Show/hide toggles
-            '[onclick*="show"]', '[onclick*="toggle"]',
-            '.show-results', '.show-matches',
-            
-            // Calendar/date controls
-            '.calendar-control', '[data-date]',
-            'input[type="date"]'
-        ];
-
-        for (const selector of interactiveSelectors) {
-            try {
-                const elements = await driver.findElements(By.css(selector));
-                console.log(`   Found ${elements.length} elements matching: ${selector}`);
-                
-                if (elements.length > 0 && elements.length < 5) {
-                    for (let i = 0; i < elements.length; i++) {
-                        try {
-                            const element = elements[i];
-                            const text = await element.getText();
-                            const href = await element.getAttribute('href');
-                            const onclick = await element.getAttribute('onclick');
-                            
-                            console.log(`   Trying to interact with: "${text}" (href: ${href}, onclick: ${onclick})`);
-                            
-                            // Try clicking the element
-                            await driver.executeScript("arguments[0].scrollIntoView(true);", element);
-                            await driver.sleep(500);
-                            await driver.executeScript("arguments[0].click();", element);
-                            await driver.sleep(3000); // Wait for content to load
-                            
-                            // Check if new content appeared
-                            const tablesAfter = await driver.findElements(By.css('table'));
-                            if (tablesAfter.length > 0) {
-                                console.log(`   ✅ Found ${tablesAfter.length} tables after clicking!`);
-                                return true;
-                            }
-                            
-                        } catch (clickError) {
-                            console.log(`   ❌ Click failed: ${clickError.message}`);
-                        }
-                    }
-                }
-            } catch (e) {
-                // Selector not found, continue
-            }
-        }
-        
-        return false;
-    }
-
-    async scrapeResults(driver, url, venue) {
+}
+async handleInteractiveElements(driver) {
+    console.log('🔄 Checking for interactive elements...');
+    const interactiveSelectors = [
+        'a[href*="#"]', '.tab', '.nav-tab', '.nav-link', '[data-toggle="tab"]',
+        'select[name*="season"]', 'select[name*="pool"]', 'select[name*="group"]',
+        'select#season', 'select#pool', 'select#group', 'select#region',
+        'button[data-season]', 'button[data-pool]', '.btn[data-target]', 
+        '.button[data-target]', '[onclick*="show"]', '[onclick*="toggle"]',
+        '.show-results', '.show-matches', '.calendar-control', '[data-date]',
+        'input[type="date"]', '.dropdown-menu a', '[role="button"]',
+        '.match-list-toggle', '.results-toggle', '.kamp-toggle', '.holdkamp-toggle'
+    ];
+    
+    for (const selector of interactiveSelectors) {
         try {
-            console.log(`🌐 Loading URL: ${url}`);
-            await driver.get(url);
+            await this.handleAlerts(driver);
+            const elements = await driver.findElements(By.css(selector));
+            console.log(`   Found ${elements.length} elements matching: ${selector}`);
             
-            // Wait for initial page load
-            await this.waitForPageComplete(driver);
-            
-            // Debug the page content
-            await this.debugPageContent(driver, url);
-            
-            // Try to interact with elements that might show content
-            const interactionSuccessful = await this.handleInteractiveElements(driver);
-            
-            if (interactionSuccessful) {
-                console.log('🎉 Found content after interaction!');
-            } else {
-                console.log('⚠️  No additional content found through interactions');
-            }
-            
-            // Try to find any table
-            const table = await this.findResultsTable(driver);
-            if (!table) {
-                console.log('❌ No table found, trying alternative content extraction...');
-                return await this.extractAlternativeContent(driver, venue);
-            }
-            
-            // Process table data
-            console.log('✅ Table found, processing data...');
-            return await this.extractMatchesFromTable(driver, table, venue);
-            
-        } catch (error) {
-            console.error('❌ Scrape error:', error);
-            return [];
-        }
-    }
-
-    // Alternative content extraction for non-table layouts
-    async extractAlternativeContent(driver, venue) {
-        console.log('🔍 Trying alternative content extraction methods...');
-        
-        const contentSelectors = [
-            '.match', '.game', '.fixture',
-            '.match-item', '.game-item', '.fixture-item',
-            '[data-match]', '[data-game]', '[data-fixture]',
-            '.result', '.score',
-            'li', 'div[class*="match"]', 'div[class*="game"]'
-        ];
-
-        for (const selector of contentSelectors) {
-            try {
-                const elements = await driver.findElements(By.css(selector));
-                if (elements.length > 0) {
-                    console.log(`Found ${elements.length} elements with selector: ${selector}`);
-                    
-                    const matches = [];
-                    for (let i = 0; i < Math.min(elements.length, 20); i++) {
-                        try {
-                            const element = elements[i];
-                            const text = await element.getText();
-                            const innerHTML = await element.getAttribute('innerHTML');
-                            
-                            if (text && text.length > 10) {
-                                matches.push({
-                                    match_id: uuidv4(),
-                                    raw_text: text,
-                                    raw_html: innerHTML,
-                                    venue: venue,
-                                    extraction_method: selector
-                                });
+            if (elements.length > 0 && elements.length < 10) {
+                for (let i = 0; i < elements.length; i++) {
+                    try {
+                        const element = elements[i];
+                        const text = await element.getText();
+                        const tag = await element.getTagName();
+                        const href = await element.getAttribute('href') || '';
+                        const onclick = await element.getAttribute('onclick') || '';
+                        
+                        console.log(`   Trying to interact with ${tag}: "${text}" (href: ${href}, onclick: ${onclick})`);
+                        await driver.executeScript("arguments[0].scrollIntoView(true);", element);
+                        await driver.sleep(500);
+                        
+                        if (tag === 'select') {
+                            const options = await element.findElements(By.css('option'));
+                            for (let j = 0; j < options.length; j++) {
+                                const optionText = await options[j].getText();
+                                if (optionText.includes('2024/2025') || optionText.toLowerCase().includes('pool c')) {
+                                    await driver.executeScript(`arguments[0].value = arguments[0].options[${j}].value; arguments[0].dispatchEvent(new Event('change'));`, element);
+                                    console.log(`   Selected option: ${optionText}`);
+                                    await driver.sleep(3000);
+                                    break;
+                                }
                             }
-                        } catch (elementError) {
-                            console.log(`Error extracting element ${i}: ${elementError.message}`);
+                        } else {
+                            await driver.executeScript("arguments[0].click();", element);
                         }
-                    }
-                    
-                    if (matches.length > 0) {
-                        console.log(`✅ Extracted ${matches.length} potential matches using ${selector}`);
-                        return matches;
+                        
+                        await driver.sleep(3000);
+                        await this.handleAlerts(driver);
+                        
+                        const tablesAfter = await driver.findElements(By.css('table, .match, .game, .fixture, .kamp, .holdkamp'));
+                        if (tablesAfter.length > 0) {
+                            console.log(`   ✅ Found ${tablesAfter.length} elements after interaction!`);
+                            return true;
+                        }
+                    } catch (clickError) {
+                        console.log(`   ❌ Interaction failed: ${clickError.message}`);
                     }
                 }
-            } catch (e) {
-                // Continue to next selector
             }
+        } catch (e) {
+            console.log(`   ❌ Selector ${selector} failed: ${e.message}`);
+        }
+    }
+    
+    return false;
+}
+async scrapeResults(driver, url, venue, retries = 0) {
+    try {
+        console.log(`🌐 Loading URL: ${url} (Attempt ${retries + 1}/3)`);
+        await driver.get(url);
+        const alertResult = await this.handleAlerts(driver);
+        if (!alertResult.success && retries < 2) {
+            console.log(`⚠️ Retrying due to alert: ${alertResult.message}`);
+            await driver.sleep(2000);
+            return await this.scrapeResults(driver, url, venue, retries + 1);
         }
         
-        console.log('❌ No alternative content found');
+        await this.waitForPageComplete(driver);
+        await this.handleAlerts(driver);
+        
+        await this.debugPageContent(driver, url);
+        
+        const interactionSuccessful = await this.handleInteractiveElements(driver);
+        if (interactionSuccessful) {
+            console.log('🎉 Found content after interaction!');
+        } else {
+            console.log('⚠️ No additional content found through interactions');
+        }
+        
+        const table = await this.findResultsTable(driver);
+        await this.handleAlerts(driver);
+        if (!table) {
+            console.log('❌ No table found, trying alternative content extraction...');
+            return await this.extractAlternativeContent(driver, venue);
+        }
+        
+        console.log('✅ Table found, processing data...');
+        return await this.extractMatchesFromTable(driver, table, venue);
+    } catch (error) {
+        console.error('❌ Scrape error:', error);
+        await this.handleAlerts(driver);
+        if (error.name === 'UnexpectedAlertOpenError' && retries < 2) {
+            console.log(`⚠️ Retrying after UnexpectedAlertOpenError (Attempt ${retries + 1}/3)`);
+            await driver.sleep(2000);
+            return await this.scrapeResults(driver, url, venue, retries + 1);
+        }
         return [];
     }
+}
 
-    async findResultsTable(driver) {
-        const selectors = [
-            'table#standings', 'table.results', 'table.match-table',
-            'table.table-striped', 'table.table-bordered',
-            'div#results table', 'div.table-container table',
-            'table.data-table', '.matches-table table',
-            'table', // Fallback to any table
-        ];
-        
-        for (const selector of selectors) {
-            console.log(`🔍 Trying table selector: ${selector}`);
-            try {
-                const tables = await driver.findElements(By.css(selector));
-                console.log(`   Found ${tables.length} tables`);
-                
-                for (const table of tables) {
-                    if (await table.isDisplayed()) {
-                        const rowCount = await driver.executeScript(`
-                            return arguments[0].querySelectorAll('tr').length;
-                        `, table);
-                        
-                        console.log(`   Table has ${rowCount} rows`);
-                        
-                        if (rowCount > 1) { // At least header + 1 data row
-                            console.log(`✅ Found valid table with selector: ${selector}`);
-                            return table;
-                        }
+    // Alternative content extraction for non-table layouts
+async extractAlternativeContent(driver, venue) {
+    console.log('🔍 Trying alternative content extraction methods...');
+    const contentSelectors = [
+        '.match', '.game', '.fixture',
+        '.match-item', '.game-item', '.fixture-item',
+        '[data-match]', '[data-game]', '[data-fixture]',
+        '.result', '.score', 'div[class*="match"]', 
+        'div[class*="game"]', 'div[class*="result"]',
+        '.kamp', '.holdkamp', '.kamp-item', '.holdkamp-item' // Danish-specific
+    ];
+    
+    for (const selector of contentSelectors) {
+        try {
+            await this.handleAlerts(driver);
+            const elements = await driver.findElements(By.css(selector));
+            console.log(`Found ${elements.length} elements with selector: ${selector}`);
+            
+            const matches = [];
+            for (let i = 0; i < Math.min(elements.length, 20); i++) {
+                try {
+                    const element = elements[i];
+                    const text = await element.getText();
+                    const innerHTML = await element.getAttribute('innerHTML');
+                    
+                    // Stricter validation for match data
+                    const teamPattern = /(\w[\w\s]+)\s+vs\.?\s+(\w[\w\s]+)/i;
+                    const datePattern = /\b(\d{1,2}\/\d{1,2}\/\d{4})\b/;
+                    const scorePattern = /\b(\d+)-(\d+)\b/;
+                    const teamMatch = text.match(teamPattern);
+                    const dateMatch = text.match(datePattern);
+                    const scoreMatch = text.match(scorePattern);
+                    
+                    if (teamMatch && teamMatch[1] !== 'Holdturnering' && teamMatch[2] !== 'Holdturnering' && text.toLowerCase().includes(venue.toLowerCase())) {
+                        matches.push({
+                            match_id: uuidv4(),
+                            home_team: teamMatch[1].trim(),
+                            away_team: teamMatch[2].trim(),
+                            date: dateMatch ? dateMatch[1] : null,
+                            time: text.match(/\b(\d{1,2}:\d{2})\b/)?.[1] || null,
+                            venue: venue,
+                            home_score: scoreMatch ? scoreMatch[1] : null,
+                            away_score: scoreMatch ? scoreMatch[2] : null,
+                            raw_text: text,
+                            raw_html: innerHTML,
+                            extraction_method: selector
+                        });
+                    } else {
+                        console.log(`❌ Skipped element ${i}: Invalid match data (text: "${text.substring(0, 50)}...")`);
+                    }
+                } catch (elementError) {
+                    console.log(`Error extracting element ${i}: ${elementError.message}`);
+                }
+            }
+            
+            if (matches.length > 0) {
+                console.log(`✅ Extracted ${matches.length} matches using ${selector}:`, JSON.stringify(matches, null, 2));
+                return matches;
+            }
+        } catch (e) {
+            console.log(`❌ Selector ${selector} failed: ${e.message}`);
+        }
+    }
+    
+    console.log('❌ No alternative content found');
+    return [];
+}
+async findResultsTable(driver) {
+    const selectors = [
+        'table#standings', 'table.results', 'table.match-table',
+        'table.table-striped', 'table.table-bordered',
+        'div#results table', 'div.table-container table',
+        'table.data-table', '.matches-table table',
+        'table', '.table', 'div.table', '[role="grid"]',
+        '.kampe-table', '.holdkampe-table', '.kampoversigt' // Danish-specific
+    ];
+    
+    for (const selector of selectors) {
+        console.log(`🔍 Trying table selector: ${selector}`);
+        try {
+            await this.handleAlerts(driver);
+            const tables = await driver.findElements(By.css(selector));
+            console.log(`   Found ${tables.length} tables`);
+            
+            for (const table of tables) {
+                if (await table.isDisplayed()) {
+                    const rowCount = await driver.executeScript(`
+                        return arguments[0].querySelectorAll('tr').length;
+                    `, table);
+                    
+                    console.log(`   Table has ${rowCount} rows`);
+                    if (rowCount > 1) {
+                        console.log(`✅ Found valid table with selector: ${selector}`);
+                        return table;
                     }
                 }
-            } catch (e) {
-                console.log(`❌ Selector ${selector} failed: ${e.message}`);
-                continue;
             }
+        } catch (e) {
+            console.log(`❌ Selector ${selector} failed: ${e.message}`);
         }
-        
-        console.log('❌ No valid table found');
-        return null;
     }
+    
+    console.log('❌ No valid table found');
+    return null;
+}
 
-    // Rest of your existing methods remain the same...
     async loadPools(season) {
         let connection;
         try {
@@ -480,148 +586,177 @@ class ScraperService {
         }
     }
 
-    async scrapeMatchesForPool({ pool, linkStructure, venue, season }) {
-        try {
-            console.log(`\n🏊 Scraping matches for pool: ${pool.pool_name}`);
-            await this.initDriver();
-            
-            const url = linkStructure
-                .replace('{pool}', pool.pool_value)
-                .replace('{group}', pool.age_group_id)
-                .replace('{region}', pool.region_id)
-                .replace('{season}', season);
-            
-            console.log(`🔗 Scraping URL: ${url}`);
-            const matches = await this.scrapeResults(this.driver, url, venue);
-            
-            console.log(`📊 Raw matches found: ${matches.length}`);
-            
-            // Process and standardize matches
-            const processedMatches = matches.map(match => ({
-                match_id: match.match_id || uuidv4(),
-                team1: match.hjemmehold || match.home_team || match.team1 || 'Unknown',
-                team2: match.udehold || match.away_team || match.team2 || 'Unknown',
-                date: match.dato || match.date || new Date().toISOString(),
-                venue: match.spillested || match.venue || venue,
-                pool_id: pool.pool_id,
-                season: season,
-                home_score: match.hjemmescore || match.home_score,
-                away_score: match.udescore || match.away_score,
-                round: match.runde || match.round,
-                raw_data: match // Keep all original data for debugging
-            }));
-            
-            console.log(`✅ Processed ${processedMatches.length} matches for pool ${pool.pool_name}`);
-            return processedMatches;
-        } catch (error) {
-            console.error(`❌ Error scraping pool ${pool.pool_name}:`, error);
+async scrapeMatchesForPool({ pool, linkStructure, venue, season }) {
+    try {
+        console.log(`\n🏊 Scraping matches for pool: ${pool.pool_name}`);
+        await this.initDriver();
+        
+        // Validate pool parameters
+        if (!pool.pool_value || !pool.age_group_id || !pool.region_id || !season) {
+            console.error(`❌ Invalid pool parameters for ${pool.pool_name}:`, JSON.stringify(pool, null, 2));
             return [];
         }
-    }
-
-    // Keep all your existing methods for extractMatchesFromTable, insertMatches, etc.
-    async extractMatchesFromTable(driver, table, venue) {
-        // Scroll table into view and wait
-        await driver.executeScript("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", table);
-        await driver.sleep(1500);
         
-        const tableHtml = await table.getAttribute('outerHTML');
-        console.log(`📋 Table HTML length: ${tableHtml.length} characters`);
+        const url = linkStructure
+            .replace('{pool}', pool.pool_value)
+            .replace('{group}', pool.age_group_id)
+            .replace('{region}', pool.region_id)
+            .replace('{season}', season);
         
-        const dom = new JSDOM(`<!DOCTYPE html>${tableHtml}`);
-        const doc = dom.window.document;
-        
-        // Extract headers
-        const headers = [];
-        const headerRow = doc.querySelector('tr.headerrow') || 
-                         doc.querySelector('thead tr') || 
-                         doc.querySelector('tr:first-child');
-        
-        if (headerRow) {
-            const headerCells = headerRow.querySelectorAll('th, td');
-            headerCells.forEach((cell, index) => {
-                let headerText = cell.textContent
-                    .toLowerCase()
-                    .replace(/\s+/g, '_')
-                    .replace(/[^a-z0-9_]/g, '')
-                    .trim();
-                    
-                headers.push(headerText || `col_${index}`);
+        console.log(`🔗 Constructed URL: ${url}`);
+        try {
+            const response = await axios.get(url, {
+                timeout: 5000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36'
+                }
             });
+            console.log(`📡 URL status: ${response.status}`);
+            if (response.status >= 400) {
+                console.error(`❌ URL returned error status: ${response.status}`);
+                return [];
+            }
+        } catch (error) {
+            console.error(`❌ URL inaccessible: ${error.message}`);
+            return [];
         }
         
-        console.log(`📊 Headers found: ${headers.join(', ')}`);
+        const matches = await this.scrapeResults(this.driver, url, venue);
+        console.log(`📊 Raw matches:`, JSON.stringify(matches, null, 2));
         
-        // Extract matches
-        const matches = [];
-        const rows = doc.querySelectorAll('tr:not(.headerrow)');
-        console.log(`📋 Data rows found: ${rows.length}`);
+        const processedMatches = matches.map(match => ({
+            match_id: match.match_id || uuidv4(),
+            team1: match.hjemmehold || match.home_team || match.team1 || 'Unknown',
+            team2: match.udehold || match.away_team || match.team2 || 'Unknown',
+            date: match.dato || match.date || new Date().toISOString().split('T')[0],
+            time: match.tid || match.time || null,
+            venue: match.spillested || match.venue || venue,
+            pool_id: pool.pool_id,
+            season: season,
+            home_score: match.hjemmescore || match.home_score || null,
+            away_score: match.udescore || match.away_score || null,
+            round: match.runde || match.round || null,
+            raw_data: match
+        }));
         
-        rows.forEach((row, rowIndex) => {
-            try {
-                const cells = row.querySelectorAll('td');
-                const matchData = {};
+        console.log(`✅ Processed ${processedMatches.length} matches for pool ${pool.pool_name}:`, JSON.stringify(processedMatches, null, 2));
+        return processedMatches;
+    } catch (error) {
+        console.error(`❌ Error scraping pool ${pool.pool_name}:`, error);
+        await this.handleAlerts(this.driver);
+        return [];
+    } finally {
+        await this.quitDriver();
+    }
+}
+
+async extractMatchesFromTable(driver, table, venue) {
+    await driver.executeScript("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", table);
+    await driver.sleep(1500);
+    
+    const tableHtml = await table.getAttribute('outerHTML');
+    console.log(`📋 Table HTML (first 500 chars): ${tableHtml.substring(0, 500)}...`);
+    
+    const dom = new JSDOM(`<!DOCTYPE html>${tableHtml}`);
+    const doc = dom.window. document;
+    
+    const headers = [];
+    const headerRow = doc.querySelector('tr.headerrow') || 
+                     doc.querySelector('thead tr') || 
+                     doc.querySelector('tr:first-child');
+    
+    if (headerRow) {
+        const headerCells = headerRow.querySelectorAll('th, td');
+        headerCells.forEach((cell, index) => {
+            let headerText = cell.textContent
+                .toLowerCase()
+                .replace(/\s+/g, '_')
+                .replace(/[^a-z0-9_]/g, '')
+                .trim();
+            headers.push(headerText || `col_${index}`);
+        });
+    }
+    
+    console.log(`📊 Headers found: ${headers.join(', ')}`);
+    
+    const matches = [];
+    const rows = doc.querySelectorAll('tr:not(.headerrow)');
+    console.log(`📋 Data rows found: ${rows.length}`);
+    
+    rows.forEach((row, rowIndex) => {
+        try {
+            const cells = row.querySelectorAll('td');
+            const matchData = {};
+            
+            cells.forEach((cell, index) => {
+                if (index >= headers.length) return;
+                const value = cell.textContent.trim();
+                matchData[headers[index]] = value;
                 
-                cells.forEach((cell, index) => {
-                    if (index >= headers.length) return;
-                    
-                    const value = cell.textContent.trim();
-                    matchData[headers[index]] = value;
-                    
-                    // Extract team IDs from links
-                    if (headers[index].includes('hold')) {
-                        const link = cell.querySelector('a');
-                        if (link) {
-                            const href = link.getAttribute('href') || '';
-                            const onclick = link.getAttribute('onclick') || '';
-                            
-                            const idPatterns = [
-                                /ShowStanding\(.*?'(\d+)'/,
-                                /team_id=(\d+)/,
-                                /\/team\/(\d+)/,
-                                /id=(\d+)/
-                            ];
-                            
-                            for (const pattern of idPatterns) {
-                                const match = (onclick + href).match(pattern);
-                                if (match) {
-                                    matchData[`${headers[index]}_id`] = match[1];
-                                    break;
-                                }
+                if (headers[index].includes('hold') || headers[index].includes('team')) {
+                    const link = cell.querySelector('a');
+                    if (link) {
+                        matchData[headers[index]] = link.textContent.trim() || value;
+                        const href = link.getAttribute('href') || '';
+                        const onclick = link.getAttribute('onclick') || '';
+                        const idPatterns = [
+                            /ShowStanding\(.*?'(\d+)'/,
+                            /team_id=(\d+)/,
+                            /\/team\/(\d+)/,
+                            /id=(\d+)/
+                        ];
+                        for (const pattern of idPatterns) {
+                            const match = (onclick + href).match(pattern);
+                            if (match) {
+                                matchData[`${headers[index]}_id`] = match[1];
+                                break;
                             }
                         }
                     }
-                });
-                
-                // Venue filtering
-                const venueKey = headers.find(h => h.includes('spillested')) || 'venue';
-                if (!venue || 
-                    !matchData[venueKey] || 
-                    matchData[venueKey].toLowerCase().includes(venue.toLowerCase())) {
-                    
+                }
+            });
+            
+            console.log(`📄 Row ${rowIndex} data:`, JSON.stringify(matchData, null, 2));
+            
+            const venueKey = headers.find(h => h.includes('spillested') || h.includes('venue') || h.includes('sted')) || 'venue';
+            const homeTeamKey = headers.find(h => h.includes('hjemmehold') || h.includes('home') || h.includes('team1') || h.includes('hold1')) || 'home_team';
+            const awayTeamKey = headers.find(h => h.includes('udehold') || h.includes('away') || h.includes('team2') || h.includes('hold2')) || 'away_team';
+            
+            // Normalize venue strings for comparison
+            const normalizeVenue = (str) => str?.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') || '';
+            const matchVenue = normalizeVenue(matchData[venueKey]);
+            const targetVenue = normalizeVenue(venue);
+            
+            // Include match if venue is not specified or matches
+            if (!venue || !matchData[venueKey] || matchVenue.includes(targetVenue)) {
+                if (matchData[homeTeamKey] && matchData[awayTeamKey] && matchData[homeTeamKey] !== 'Unknown' && matchData[awayTeamKey] !== 'Unknown') {
                     matches.push({
                         match_id: matchData.id || matchData.no || uuidv4(),
-                        date: matchData.dato || matchData.date,
-                        time: matchData.tid || matchData.time,
-                        home_team: matchData.hjemmehold || matchData.home,
-                        away_team: matchData.udehold || matchData.away,
-                        venue: matchData[venueKey],
-                        home_score: matchData.hjemmescore,
-                        away_score: matchData.udescore,
-                        round: matchData.runde,
+                        date: matchData.dato || matchData.date || null,
+                        time: matchData.tid || matchData.time || null,
+                        home_team: matchData[homeTeamKey],
+                        away_team: matchData[awayTeamKey],
+                        venue: matchData[venueKey] || venue,
+                        home_score: matchData.hjemmescore || matchData.score?.split('-')[0] || null,
+                        away_score: matchData.udescore || matchData.score?.split('-')[1] || null,
+                        round: matchData.runde || matchData.round || null,
                         row_index: rowIndex,
                         raw_data: matchData
                     });
+                } else {
+                    console.log(`❌ Row ${rowIndex} skipped: Invalid team names (home: ${matchData[homeTeamKey]}, away: ${matchData[awayTeamKey]})`);
                 }
-                
-            } catch (rowError) {
-                console.error(`Error processing row ${rowIndex}:`, rowError);
+            } else {
+                console.log(`❌ Row ${rowIndex} filtered out: venue=${venue}, matchData[${venueKey}]=${matchData[venueKey]}`);
             }
-        });
-        
-        console.log(`✔ Extracted ${matches.length} matches from table`);
-        return matches;
-    }
+        } catch (rowError) {
+            console.error(`Error processing row ${rowIndex}:`, rowError);
+        }
+    });
+    
+    console.log(`✔ Extracted ${matches.length} matches from table:`, JSON.stringify(matches, null, 2));
+    return matches;
+}
 
     async getScraperProgress(sessionId) {
         try {
@@ -691,67 +826,87 @@ async insertMatches(matches, metadata) {
 }
 
     // Keep all your other existing methods...
-    async runAllCalendarScraper(params) {
-        let connection;
-        try {
-            const { season, linkStructure, venue, sessionId } = params;
-            connection = await pool.getConnection();
-            const pools = await this.loadPools(season);
-            if (!pools || pools.length === 0) {
-                throw new Error(`No tournament pools found for season ${season}`);
-            }
-            
-            let totalMatches = 0;
-            const allMatches = [];
-            
-            for (const pool of pools) {
-                console.log('Processing pool:', pool);
-                const matches = await this.scrapeMatchesForPool({ 
-                    pool,
-                    linkStructure,
-                    venue,
-                    season
-                });
-                if (matches?.length > 0) {
-                    allMatches.push(...matches);
-                    totalMatches += matches.length;
-                }
-            }
-            
-            // Save matches
-            if (allMatches.length > 0) {
-                await this.insertMatches(allMatches, {
-                    season_name: season,
-                    region_name: pools[0].region_name || 'Unknown',
-                    age_group_name: pools[0].age_group_name || 'Unknown',
-                    pool_name: pools[0].pool_name || 'Unknown',
-                    tournament_level: pools[0].tournament_level || 'Unknown',
-                    google_color_id: pools[0].google_color_id || 'Unknown',
-                    season,
-                    region: pools[0].region_id || 'Unknown',
-                    ageGroup: pools[0].age_group_id || 'Unknown',
-                    poolValue: pools[0].pool_value || 'Unknown',
-                    venue,
-                    hex_color: pools[0].hex_color || '#000000'
-                });
-            }
-            
-            return {
-                success: true,
-                totalMatches,
-                message: `Successfully scraped ${totalMatches} matches`
-            };
-        } catch (error) {
-            console.error('Scraping failed:', error);
-            return {
-                success: false,
-                totalMatches: 0,
-                message: error.message
-            };
-        } finally {
-            if (connection) connection.release();
+  async runAllCalendarScraper(params) {
+    let connection;
+    try {
+        const { season, linkStructure, venue, sessionId } = params;
+        connection = await pool.getConnection();
+        const pools = await this.loadPools(season);
+        console.log(`📋 Total pools loaded: ${pools.length}`, JSON.stringify(pools.map(p => ({
+            pool_name: p.pool_name,
+            pool_value: p.pool_value,
+            region_id: p.region_id,
+            age_group_id: p.age_group_id
+        })), null, 2));
+        if (!pools || pools.length === 0) {
+            throw new Error(`No tournament pools found for season ${season}`);
         }
+        
+        this.progress.sessionId = sessionId;
+        this.progress.status = 'running';
+        this.progress.totalPools = pools.length;
+        this.progress.poolsProcessed = 0;
+        this.progress.totalMatches = 0;
+
+        let totalMatches = 0;
+        const allMatches = [];
+        
+        for (const pool of pools) {
+            console.log(`🏊 Processing pool: ${pool.pool_name} (ID: ${pool.pool_value}, Region: ${pool.region_id}, Group: ${pool.age_group_id})`);
+            this.progress.poolsProcessed++;
+            const matches = await this.scrapeMatchesForPool({ 
+                pool,
+                linkStructure,
+                venue,
+                season
+            });
+            console.log(`📊 Matches for pool ${pool.pool_name}: ${matches.length}`, JSON.stringify(matches, null, 2));
+            if (matches?.length > 0) {
+                allMatches.push(...matches);
+                totalMatches += matches.length;
+                this.progress.totalMatches = totalMatches;
+            }
+        }
+        
+        if (allMatches.length > 0) {
+            console.log(`💾 Saving ${allMatches.length} matches to database`);
+            await this.insertMatches(allMatches, {
+                season_name: season,
+                region_name: pools[0].region_name || 'Unknown',
+                age_group_name: pools[0].age_group_name || 'Unknown',
+                pool_name: pools[0].pool_name || 'Unknown',
+                tournament_level: pools[0].tournament_level || 'Unknown',
+                google_color_id: pools[0].google_color_id || 'Unknown',
+                season,
+                region: pools[0].region_id || 'Unknown',
+                ageGroup: pools[0].age_group_id || 'Unknown',
+                poolValue: pools[0].pool_value || 'Unknown',
+                venue,
+                hex_color: pools[0].hex_color || '#000000'
+            });
+        } else {
+            console.warn(`⚠️ No matches found for venue ${venue}`);
+        }
+        
+        this.progress.status = 'completed';
+        return {
+            success: true,
+            totalMatches,
+            message: `Successfully scraped ${totalMatches} matches`
+        };
+    } catch (error) {
+        console.error('Scraping failed:', error);
+        this.progress.status = 'failed';
+        this.progress.error = error.message;
+        return {
+            success: false,
+            totalMatches: 0,
+            message: error.message
+        };
+    } finally {
+        if (connection) connection.release();
     }
+}
 
     async closePool() {
         if (this.pool) {

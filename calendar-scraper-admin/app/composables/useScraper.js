@@ -41,7 +41,7 @@ export const useScraper = () => {
   // Create axios instance with correct base URL
   const axiosInstance = axios.create({
     baseURL: `${apiBase}${apiPrefix}/scraper`,
-    timeout: 300000, // 5 minutes for long scraping operations
+    timeout: 1800000, 
     headers: { 
       'Content-Type': 'application/json'
     }
@@ -153,76 +153,84 @@ export const useScraper = () => {
       }
 
       // Start polling for progress (fixed endpoint name)
-      scraperStatus.pollInterval = setInterval(async () => {
-        try {
-          const progressResponse = await axiosInstance.get('/scraper-progress', {
-            params: { session_id: sessionId } // Fixed parameter name
-          })
-          
-          console.log('📊 Progress response:', progressResponse.data)
-          
-          if (progressResponse.data.success) {
-            const { data } = progressResponse.data
-            const { progress = 0, message = '', status = 'running' } = data
+        scraperStatus.pollInterval = setInterval(async () => {
+          try {
+            const progressResponse = await axiosInstance.get('/scraper-progress', {
+              params: { session_id: sessionId }
+            });
             
-            scraperStatus.linkLevelProgress = { 
-              currentLevel: 4, 
-              processed: progress, 
-              total: 100, 
-              percentage: progress,
-              currentItem: message || 'Scraping matches...'
-            }
-            scrapeProgress.value = progress
+            console.log('📊 Progress response:', progressResponse.data);
+            
+            if (progressResponse.data.success) {
+              const { progress } = progressResponse.data; // Access progress directly
+              const { status, totalPools, poolsProcessed, totalMatches, error } = progress;
+              
+              // Calculate percentage progress
+              const percentage = totalPools > 0 ? Math.round((poolsProcessed / totalPools) * 100) : 0;
+              
+              scraperStatus.linkLevelProgress = {
+                currentLevel: 4,
+                processed: poolsProcessed,
+                total: totalPools,
+                percentage: percentage,
+                currentItem: `Processing pool ${poolsProcessed}/${totalPools}`
+              };
+              scrapeProgress.value = percentage;
 
-            // Check if scraping is complete
-            if (status === 'completed') {
-              clearInterval(scraperStatus.pollInterval)
-              scraperStatus.pollInterval = null
+              // Check if scraping is complete
+              if (status === 'completed') {
+                clearInterval(scraperStatus.pollInterval);
+                scraperStatus.pollInterval = null;
+                
+                scraperStatus.linkLevelStats = { matches: totalMatches };
+                scraperStatus.currentActivity = '';
+                scraperStatus.isRunning = false;
+                isScraping.value = false;
+                lastScrape.value = new Date();
+                
+                addNotification(`Scraping completed! Found ${totalMatches} matches`, 'success');
+              } else if (status === 'failed') {
+                clearInterval(scraperStatus.pollInterval);
+                scraperStatus.pollInterval = null;
+                
+                const errorMessage = error || 'Scraping failed';
+                scraperStatus.error = errorMessage;
+                scraperStatus.isRunning = false;
+                isScraping.value = false;
+                scrapeError.value = errorMessage;
+                
+                addNotification(`Scraping failed: ${errorMessage}`, 'error');
+              }
+            } else {
+              // Handle unsuccessful progress response
+              clearInterval(scraperStatus.pollInterval);
+              scraperStatus.pollInterval = null;
+              scraperStatus.isRunning = false;
+              isScraping.value = false;
+              const errorMessage = progressResponse.data.message || 'Failed to get scraper progress';
+              scrapeError.value = errorMessage;
+              addNotification(`Scraping failed: ${errorMessage}`, 'error');
+            }
+          } catch (progressError) {
+            console.error('Progress polling error:', progressError);
+            
+            if (!scraperStatus.progressErrorCount) {
+              scraperStatus.progressErrorCount = 1;
+            } else {
+              scraperStatus.progressErrorCount++;
+            }
+            
+            if (scraperStatus.progressErrorCount > 10) {
+              clearInterval(scraperStatus.pollInterval);
+              scraperStatus.pollInterval = null;
+              scraperStatus.isRunning = false;
+              isScraping.value = false;
               
-              // Handle successful completion
-              const totalMatches = data.matches || 0
-              scraperStatus.linkLevelStats = { matches: totalMatches }
-              scraperStatus.currentActivity = ''
-              scraperStatus.isRunning = false
-              isScraping.value = false
-              lastScrape.value = new Date()
-              
-              addNotification(`Scraping completed! Found ${totalMatches} matches`, 'success')
-              
-            } else if (status === 'failed') {
-              clearInterval(scraperStatus.pollInterval)
-              scraperStatus.pollInterval = null
-              
-              const errorMessage = message || 'Scraping failed'
-              scraperStatus.error = errorMessage
-              scraperStatus.isRunning = false
-              isScraping.value = false
-              scrapeError.value = errorMessage
-              
-              addNotification(`Scraping failed: ${errorMessage}`, 'error')
+              const errorMessage = progressError.response?.data?.message || progressError.message || 'Progress check failed';
+              addNotification(`Progress check failed repeatedly: ${errorMessage}`, 'error');
             }
           }
-        } catch (progressError) {
-          console.error('Progress polling error:', progressError)
-          
-          // Don't clear interval immediately on progress errors - might be temporary
-          // But limit retries to avoid infinite polling
-          if (!scraperStatus.progressErrorCount) {
-            scraperStatus.progressErrorCount = 1
-          } else {
-            scraperStatus.progressErrorCount++
-          }
-          
-          if (scraperStatus.progressErrorCount > 10) {
-            clearInterval(scraperStatus.pollInterval)
-            scraperStatus.pollInterval = null
-            scraperStatus.isRunning = false
-            isScraping.value = false
-            
-            addNotification(`Progress check failed repeatedly: ${progressError.message}`, 'error')
-          }
-        }
-      }, 2000) // Poll every 2 seconds (less aggressive)
+        }, 2000); // Poll every 2 seconds
 
     } catch (error) {
       console.error('Scraping error:', error)
