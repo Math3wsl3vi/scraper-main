@@ -44,21 +44,20 @@ class ScraperService {
             if (!this.driver) {
                 try {
                     const options = new chrome.Options();
-                    options.addArguments(
-                        '--headless=new',
-                        '--disable-gpu',
-                        '--no-sandbox',
-                        '--disable-dev-shm-usage',
-                        '--disable-web-security',
-                        '--disable-features=VizDisplayCompositor',
-                        '--window-size=1920,1080',
-                        `--user-data-dir=/tmp/chrome-profile-${uuidv4()}`,
-                        '--disable-extensions',
-                        '--disable-blink-features=AutomationControlled',
-                        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                        '--blink-settings=imagesEnabled=false', // Disable images to speed up loading
-                        '--disable-javascript' // Optional: test if content is static
-                    );
+                   options.addArguments(
+                    '--headless=new',
+                    '--disable-gpu',
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-web-security',
+                    '--disable-features=VizDisplayCompositor',
+                    '--window-size=1920,1080',
+                    `--user-data-dir=/tmp/chrome-profile-${uuidv4()}`,
+                    '--disable-extensions',
+                    '--disable-blink-features=AutomationControlled',
+                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    '--blink-settings=imagesEnabled=false'
+                );
                     
                     options.excludeSwitches('enable-automation');
                     options.addArguments('--disable-blink-features=AutomationControlled');
@@ -658,7 +657,7 @@ async extractMatchesFromTable(driver, table, venue) {
     console.log(`📋 Table HTML (first 500 chars): ${tableHtml.substring(0, 500)}...`);
     
     const dom = new JSDOM(`<!DOCTYPE html>${tableHtml}`);
-    const doc = dom.window. document;
+    const doc = dom.window.document;
     
     const headers = [];
     const headerRow = doc.querySelector('tr.headerrow') || 
@@ -675,8 +674,10 @@ async extractMatchesFromTable(driver, table, venue) {
                 .trim();
             headers.push(headerText || `col_${index}`);
         });
+    } else {
+        console.warn('⚠️ No header row detected, using default headers');
+        headers.push('home_team', 'away_team', 'venue', 'date', 'time', 'score', 'round');
     }
-    
     console.log(`📊 Headers found: ${headers.join(', ')}`);
     
     const matches = [];
@@ -689,30 +690,33 @@ async extractMatchesFromTable(driver, table, venue) {
             const matchData = {};
             
             cells.forEach((cell, index) => {
-                if (index >= headers.length) return;
-                const value = cell.textContent.trim();
-                matchData[headers[index]] = value;
-                
-                if (headers[index].includes('hold') || headers[index].includes('team')) {
-                    const link = cell.querySelector('a');
-                    if (link) {
-                        matchData[headers[index]] = link.textContent.trim() || value;
-                        const href = link.getAttribute('href') || '';
-                        const onclick = link.getAttribute('onclick') || '';
-                        const idPatterns = [
-                            /ShowStanding\(.*?'(\d+)'/,
-                            /team_id=(\d+)/,
-                            /\/team\/(\d+)/,
-                            /id=(\d+)/
-                        ];
-                        for (const pattern of idPatterns) {
-                            const match = (onclick + href).match(pattern);
-                            if (match) {
-                                matchData[`${headers[index]}_id`] = match[1];
-                                break;
+                if (index < headers.length) {
+                    const value = cell.textContent.trim();
+                    matchData[headers[index]] = value;
+                    
+                    if (headers[index].includes('hold') || headers[index].includes('team')) {
+                        const link = cell.querySelector('a');
+                        if (link) {
+                            matchData[headers[index]] = link.textContent.trim() || value;
+                            const href = link.getAttribute('href') || '';   
+                            const onclick = link.getAttribute('onclick') || '';
+                            const idPatterns = [
+                                /ShowStanding\(.*?'(\d+)'/, 
+                                /team_id=(\d+)/,
+                                /\/team\/(\d+)/,
+                                /id=(\d+)/
+                            ];
+                            for (const pattern of idPatterns) {
+                                const match = (onclick + href).match(pattern);
+                                if (match) {
+                                    matchData[`${headers[index]}_id`] = match[1];
+                                    break;
+                                }
                             }
                         }
                     }
+                } else {
+                    console.log(`⚠️ Extra cell at index ${index} ignored for row ${rowIndex}`);
                 }
             });
             
@@ -722,20 +726,23 @@ async extractMatchesFromTable(driver, table, venue) {
             const homeTeamKey = headers.find(h => h.includes('hjemmehold') || h.includes('home') || h.includes('team1') || h.includes('hold1')) || 'home_team';
             const awayTeamKey = headers.find(h => h.includes('udehold') || h.includes('away') || h.includes('team2') || h.includes('hold2')) || 'away_team';
             
-            // Normalize venue strings for comparison
             const normalizeVenue = (str) => str?.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') || '';
             const matchVenue = normalizeVenue(matchData[venueKey]);
             const targetVenue = normalizeVenue(venue);
             
-            // Include match if venue is not specified or matches
-            if (!venue || !matchData[venueKey] || matchVenue.includes(targetVenue)) {
-                if (matchData[homeTeamKey] && matchData[awayTeamKey] && matchData[homeTeamKey] !== 'Unknown' && matchData[awayTeamKey] !== 'Unknown') {
+            console.log(`🔍 Venue check: target=${targetVenue}, match=${matchVenue}, includes=${matchVenue.includes(targetVenue) || matchVenue.includes('grøndal')}`);
+            if (!venue || !matchData[venueKey] || matchVenue.includes(targetVenue) || matchVenue.includes('grøndal')) {
+                if (matchData[homeTeamKey] && matchData[awayTeamKey] && 
+                    matchData[homeTeamKey].trim() !== 'Unknown' && 
+                    matchData[awayTeamKey].trim() !== 'Unknown' && 
+                    matchData[homeTeamKey].trim() !== '' && 
+                    matchData[awayTeamKey].trim() !== '') {
                     matches.push({
                         match_id: matchData.id || matchData.no || uuidv4(),
                         date: matchData.dato || matchData.date || null,
                         time: matchData.tid || matchData.time || null,
-                        home_team: matchData[homeTeamKey],
-                        away_team: matchData[awayTeamKey],
+                        home_team: matchData[homeTeamKey].trim(),
+                        away_team: matchData[awayTeamKey].trim(),
                         venue: matchData[venueKey] || venue,
                         home_score: matchData.hjemmescore || matchData.score?.split('-')[0] || null,
                         away_score: matchData.udescore || matchData.score?.split('-')[1] || null,
@@ -744,10 +751,10 @@ async extractMatchesFromTable(driver, table, venue) {
                         raw_data: matchData
                     });
                 } else {
-                    console.log(`❌ Row ${rowIndex} skipped: Invalid team names (home: ${matchData[homeTeamKey]}, away: ${matchData[awayTeamKey]})`);
+                    console.log(`❌ Row ${rowIndex} skipped: Invalid team names (home: "${matchData[homeTeamKey] || 'null'}", away: "${matchData[awayTeamKey] || 'null'}")`);
                 }
             } else {
-                console.log(`❌ Row ${rowIndex} filtered out: venue=${venue}, matchData[${venueKey}]=${matchData[venueKey]}`);
+                console.log(`❌ Row ${rowIndex} filtered out: venue=${venue}, matchData[${venueKey}]=${matchData[venueKey] || 'null'}`);
             }
         } catch (rowError) {
             console.error(`Error processing row ${rowIndex}:`, rowError);
